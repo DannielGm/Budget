@@ -163,6 +163,26 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         }
     }
 
+    fun clearAllData() {
+        budget?.let { current ->
+            saving = true
+            scope.launch {
+                runCatching {
+                    val seed = withContext(Dispatchers.IO) { SeedLoader.load(context) }
+                    withContext(Dispatchers.IO) { repository.clearAllAndSeed(seed) }
+                }.onSuccess {
+                    budget = null
+                    selectedCategoryName = null
+                    dateFilter = null
+                    withContext(Dispatchers.IO) { budget = repository.loadOrSeed(SeedLoader.load(context)) }
+                }.onFailure {
+                    error = "No se pudo limpiar los datos."
+                }
+                saving = false
+            }
+        }
+    }
+
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
             error != null && budget == null -> ErrorState(error!!)
@@ -182,6 +202,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                 onEditExpense = { category, expense -> editingExpense = category to expense },
                 onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
                 onFillMockData = { fillMockData() },
+                onClearAllData = { clearAllData() },
                 onOpenDatePicker = { showDatePicker = true }
             )
         }
@@ -281,6 +302,7 @@ private fun BudgetScreen(
     onEditExpense: (String, Expense) -> Unit,
     onDeleteExpense: (String, Expense) -> Unit,
     onFillMockData: () -> Unit,
+    onClearAllData: () -> Unit,
     onOpenDatePicker: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -319,6 +341,13 @@ private fun BudgetScreen(
                                 menuExpanded = false
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Limpiar todos los datos") },
+                            onClick = {
+                                onClearAllData()
+                                menuExpanded = false
+                            }
+                        )
                     }
                 }
             )
@@ -328,17 +357,17 @@ private fun BudgetScreen(
             Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             BalanceCard(budget, onEditBudget)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             MetricsRow(budget)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Column(Modifier.padding(12.dp)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -357,7 +386,7 @@ private fun BudgetScreen(
                     BudgetGraph(
                         budget = budget,
                         modifier = Modifier
-                            .height(120.dp)
+                            .height(128.dp)
                             .fillMaxWidth()
                             .pointerInput(Unit) {
                                 detectTapGestures(onTap = { onOpenDatePicker() })
@@ -366,7 +395,7 @@ private fun BudgetScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             DebtCard(budget, onEditDebt)
             Spacer(Modifier.height(16.dp))
 
@@ -500,20 +529,27 @@ private fun CategoryCardContent(
 
 @Composable
 private fun BalanceCard(budget: Budget, onEdit: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Saldo disponible", color = Color.White.copy(alpha = .78f), style = MaterialTheme.typography.labelLarge)
-            Text("Bs ${budget.balanceBs.display()}", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("$ ${budget.balanceUsd?.display() ?: "No disponible"}", color = Color.White.copy(alpha = .86f), style = MaterialTheme.typography.bodyLarge)
+            Text("Saldo disponible", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .82f), style = MaterialTheme.typography.labelLarge)
+            Text("Bs ${budget.balanceBs.display()}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            Text("$ ${budget.balanceUsd?.display() ?: "No disponible"}", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .9f), style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(4.dp))
-            OutlinedButton(onClick = onEdit) { Text("Ajustar ingresos y conversiones") }
+            OutlinedButton(
+                onClick = onEdit,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f))
+            ) { Text("Ajustar ingresos y conversiones", color = MaterialTheme.colorScheme.onPrimary) }
         }
     }
 }
 
 @Composable
 private fun MetricsRow(budget: Budget) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         MetricCard("Ingresos", "Bs ${budget.incomeBs.display()}", Modifier.weight(1f))
         MetricCard("Gastos de caja", "Bs ${budget.cashBs.display()}", Modifier.weight(1f))
     }

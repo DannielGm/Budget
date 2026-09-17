@@ -91,7 +91,17 @@ interface BudgetDao {
 
     @Query("DELETE FROM debts WHERE monthId = :monthId")
     suspend fun deleteDebts(monthId: String)
-}
+    @Query("DELETE FROM budgets")
+    suspend fun deleteAllBudgets(): Unit
+
+    @Query("DELETE FROM categories")
+    suspend fun deleteAllCategories(): Unit
+
+    @Query("DELETE FROM expenses")
+    suspend fun deleteAllExpenses(): Unit
+
+    @Query("DELETE FROM debts")
+    suspend fun deleteAllDebts(): Unit}
 
 @Database(
     entities = [BudgetEntity::class, CategoryEntity::class, ExpenseEntity::class, DebtEntity::class],
@@ -148,6 +158,16 @@ class BudgetRepository(private val database: BudgetDatabase) {
                 ExpenseEntity(monthId, expense.id, category.name, expense.label, expense.amountBs.toPlainString(), expense.rate.toPlainString(), expense.timestamp, index)
             } })
             dao.insertDebts(budget.debts.mapIndexed { index, debt -> DebtEntity(monthId, debt.label, debt.openingBs.toPlainString(), debt.paymentBs.toPlainString(), index) })
+        }
+    }
+
+    suspend fun clearAllAndSeed(seed: Budget) {
+        database.withTransaction {
+            dao.deleteAllBudgets()
+            dao.deleteAllCategories()
+            dao.deleteAllExpenses()
+            dao.deleteAllDebts()
+            save(seed)
         }
     }
 
