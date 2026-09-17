@@ -28,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -337,9 +336,9 @@ private fun BudgetScreen(
             TopAppBar(
                 title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White,
-                    actionIconContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    titleContentColor = MaterialTheme.colorScheme.onSecondary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSecondary
                 ),
                 actions = {
                     if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp, color = Color.White)
@@ -396,7 +395,6 @@ private fun BudgetScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         listOf(1 to "1d", 7 to "7d", 30 to "30d").forEach { (days, label) ->
                             FilterChip(
                                 modifier = Modifier.height(32.dp),
@@ -406,6 +404,7 @@ private fun BudgetScreen(
                             )
                         }
                         Spacer(Modifier.weight(1f))
+                        Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     if (dateFilter != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -498,11 +497,11 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
 
     if (dataPoints.isEmpty()) return
 
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val graphColor = MaterialTheme.colorScheme.secondary
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     val gridColorSecondary = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
-    Canvas(modifier.padding(start = 40.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
+    Canvas(modifier.padding(start = 28.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
         val width = size.width
         val height = size.height
         val maxVal = dataPoints.maxOf { it }.toFloat().coerceAtLeast(1f)
@@ -534,7 +533,7 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
             val y = height - ((valRow.toFloat() - minVal) / range * height)
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        drawPath(path, primaryColor, style = Stroke(width = 3.dp.toPx()))
+        drawPath(path, graphColor, style = Stroke(width = 3.dp.toPx()))
 
         val axisPaint = android.graphics.Paint().apply {
             color = axisColor
