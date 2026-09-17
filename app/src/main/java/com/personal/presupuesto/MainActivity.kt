@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -129,6 +130,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showDebtSummary by remember { mutableStateOf(false) }
+    var showCategoryPicker by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -250,6 +252,15 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     onEditBudget = { editingBudget = true },
                     onOpenSummary = { showSummary = true },
                     onOpenDebtSummary = { showDebtSummary = true },
+                    onAddCategory = { category ->
+                        selectedCategoryName = category.name
+                        persist(budget!!.copy(categories = budget!!.categories + category))
+                    },
+                    onDeleteCategory = { categoryName ->
+                        val remaining = budget!!.categories.filterNot { it.name == categoryName }
+                        persist(budget!!.copy(categories = remaining))
+                        selectedCategoryName = remaining.firstOrNull()?.name
+                    },
                     onEditDebt = { editingDebt = it },
                     onAddExpense = { addingToCategory = it },
                     onEditExpense = { category, expense -> editingExpense = category to expense },
@@ -368,6 +379,8 @@ private fun BudgetScreen(
     onEditBudget: () -> Unit,
     onOpenSummary: () -> Unit,
     onOpenDebtSummary: () -> Unit,
+    onAddCategory: (Category) -> Unit,
+    onDeleteCategory: (String) -> Unit,
     onEditDebt: (Debt) -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
@@ -377,6 +390,7 @@ private fun BudgetScreen(
     onOpenDatePicker: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var showCategoryPicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -393,18 +407,8 @@ private fun BudgetScreen(
                         Icon(if (isDarkTheme) Icons.Default.Star else Icons.Default.Settings, "Toggle Theme")
                     }
                     IconButton(onClick = onEditBudget) { Icon(Icons.Default.Edit, "Editar presupuesto") }
-                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.AutoMirrored.Filled.List, "Categorías") }
+                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "Más opciones") }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        budget.categories.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category.name) },
-                                onClick = {
-                                    onCategorySelect(category.name)
-                                    menuExpanded = false
-                                }
-                            )
-                        }
-                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("Llenar datos de prueba") },
                             onClick = {
@@ -510,7 +514,18 @@ private fun BudgetScreen(
                         }
                     }
                     item {
-                        CategoryCardContent(selectedCategory, onAddExpense, onEditExpense, onDeleteExpense)
+                        CategoryCardContent(
+                            category = selectedCategory,
+                            onCategoryClick = { showCategoryPicker = true },
+                            onSwipeCategory = { direction ->
+                                val currentIndex = budget.categories.indexOfFirst { it.name == selectedCategory.name }
+                                val nextIndex = (currentIndex + direction).mod(budget.categories.size)
+                                onCategorySelect(budget.categories[nextIndex].name)
+                            },
+                            onAdd = onAddExpense,
+                            onEdit = onEditExpense,
+                            onDelete = onDeleteExpense
+                        )
                     }
                 }
             } else {
@@ -519,6 +534,24 @@ private fun BudgetScreen(
                 }
             }
         }
+    }
+
+    if (showCategoryPicker) {
+        CategoryPickerDialog(
+            categories = budget.categories,
+            selectedCategoryName = selectedCategoryName,
+            onDismiss = { showCategoryPicker = false },
+            onSelect = {
+                onCategorySelect(it)
+                showCategoryPicker = false
+            },
+            onAdd = { category ->
+                onAddCategory(category)
+            },
+            onDelete = { categoryName ->
+                onDeleteCategory(categoryName)
+            }
+        )
     }
 }
 
@@ -603,19 +636,39 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
 @Composable
 private fun CategoryCardContent(
     category: Category,
+    onCategoryClick: () -> Unit,
+    onSwipeCategory: (Int) -> Unit,
     onAdd: (String) -> Unit,
     onEdit: (String, Expense) -> Unit,
     onDelete: (String, Expense) -> Unit
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .pointerInput(category.name) {
+                var horizontalDistance = 0f
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (kotlin.math.abs(horizontalDistance) > 48f) {
+                            onSwipeCategory(if (horizontalDistance < 0) 1 else -1)
+                        }
+                        horizontalDistance = 0f
+                    },
+                    onDragCancel = { horizontalDistance = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        horizontalDistance += dragAmount
+                    }
+                )
+            }
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(category.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (category.cashExpense) "Gasto de caja" else "Compra a crédito",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        category.name,
+                        modifier = Modifier.clickable(onClick = onCategoryClick),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
                     )
                 }
                 IconButton(onClick = { onAdd(category.name) }) { Icon(Icons.Default.Add, "Agregar") }
@@ -630,7 +683,7 @@ private fun CategoryCardContent(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(expense.label, style = MaterialTheme.typography.bodyLarge)
-                        Text("Bs ${expense.amountBs.display()}  ·  $ ${expense.amountUsd.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$ ${expense.amountUsd.display()}  ·  Bs ${expense.amountBs.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             "${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(expense.timestamp))}",
                             style = MaterialTheme.typography.bodySmall,
@@ -642,7 +695,7 @@ private fun CategoryCardContent(
                 }
             }
             HorizontalDivider()
-            Text("Total  Bs ${category.totalBs.display()}  ·  $ ${category.totalUsd.display()}", fontWeight = FontWeight.SemiBold)
+            Text("Total  $ ${category.totalUsd.display()}  ·  Bs ${category.totalBs.display()}", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -658,8 +711,8 @@ private fun BalanceCard(budget: Budget, onEdit: () -> Unit, onOpenSummary: () ->
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Saldo disponible", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .82f), style = MaterialTheme.typography.labelLarge)
-            Text("Bs ${budget.balanceBs.display()}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("$ ${budget.balanceUsd?.display() ?: "No disponible"}", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .9f), style = MaterialTheme.typography.bodyLarge)
+            Text("$ ${budget.balanceUsd?.display() ?: BigDecimal.ZERO.display()}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            Text("Bs ${budget.balanceBs.display()}", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .9f), style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(2.dp))
             OutlinedButton(
                 onClick = onEdit,
@@ -692,11 +745,11 @@ private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(budget.monthLabel, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            MetricCard("Ingresos", "Bs ${budget.incomeBs.display()}", Modifier.fillMaxWidth())
-            MetricCard("Gastos", "Bs ${budget.cashBs.display()}", Modifier.fillMaxWidth())
-            MetricCard("Conversión", "Bs ${budget.conversionBs.display()}", Modifier.fillMaxWidth())
-            MetricCard("Saldo disponible", "Bs ${budget.balanceBs.display()}", Modifier.fillMaxWidth())
-            MetricCard("Deuda total", "Bs ${budget.debtBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Ingresos", "$ ${budget.incomeUsd.display()}", Modifier.fillMaxWidth())
+            MetricCard("Gastos", "$ ${budget.cashUsd.display()}", Modifier.fillMaxWidth())
+            MetricCard("Conversión", "$ ${convert(budget.conversionBs, budget.incomeRate).display()}", Modifier.fillMaxWidth())
+            MetricCard("Saldo disponible", "$ ${budget.balanceUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
+            MetricCard("Deuda total", "$ ${budget.debtUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
         }
     }
 }
@@ -712,6 +765,74 @@ private fun MetricCard(label: String, value: String, modifier: Modifier) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryPickerDialog(
+    categories: List<Category>,
+    selectedCategoryName: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+    onAdd: (Category) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var adding by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var cashExpense by remember { mutableStateOf(true) }
+    var invalid by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Categorías de gastos") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                categories.forEach { category ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            category.name,
+                            modifier = Modifier.weight(1f).clickable { onSelect(category.name) },
+                            fontWeight = if (category.name == selectedCategoryName) FontWeight.Bold else FontWeight.Normal
+                        )
+                        IconButton(onClick = { onDelete(category.name) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Eliminar categoría")
+                        }
+                    }
+                }
+                if (adding) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it; invalid = false },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = cashExpense, onCheckedChange = { cashExpense = it })
+                        Text("Gasto de caja")
+                    }
+                    if (invalid) Text("Usa un nombre nuevo.", color = MaterialTheme.colorScheme.error)
+                    Button(onClick = {
+                        val trimmed = name.trim()
+                        if (trimmed.isBlank() || categories.any { it.name.equals(trimmed, ignoreCase = true) }) {
+                            invalid = true
+                        } else {
+                            onAdd(Category(trimmed, cashExpense, emptyList()))
+                            name = ""
+                            adding = false
+                        }
+                    }) { Text("Guardar categoría") }
+                } else {
+                    OutlinedButton(onClick = { adding = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Agregar categoría")
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }
+    )
+}
+
 @Composable
 private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit) {
     Card(
@@ -723,7 +844,7 @@ private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Deuda", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text("Bs ${budget.debtBs.display()}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                Text("$ ${budget.debtUsd?.display() ?: BigDecimal.ZERO.display()}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
             }
             Text("Toca para ver el detalle", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -756,7 +877,7 @@ private fun DebtSummaryScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            MetricCard("Deuda total", "Bs ${budget.debtBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Deuda total", "$ ${budget.debtUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
             if (budget.debts.isEmpty()) {
                 Text("No hay deudas registradas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -768,8 +889,8 @@ private fun DebtSummaryScreen(
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(debt.label, fontWeight = FontWeight.SemiBold)
-                                Text("Saldo restante: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall)
-                                Text("Inicial: Bs ${debt.openingBs.display()}  ·  Pagado: Bs ${debt.paymentBs.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Saldo restante: $ ${convert(debt.remainingBs, budget.incomeRate).display()}", style = MaterialTheme.typography.bodySmall)
+                                Text("Inicial: $ ${convert(debt.openingBs, budget.incomeRate).display()}  ·  Pagado: $ ${convert(debt.paymentBs, budget.incomeRate).display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             IconButton(onClick = { onEditDebt(debt) }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Editar deuda")
