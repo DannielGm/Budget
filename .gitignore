@@ -1,0 +1,17 @@
+# Private source data and extracted financial information
+*.xlsx
+workbook_inventory.json
+workbook_values.private.json
+*.private.txt
+*.private.json
+*.apk
+*.aab
+.venv/
+__pycache__/
+# Android local tooling and credentials
+local.properties
+.gradle/
+.tools/
+**/build/
+*.jks
+*.keystore
