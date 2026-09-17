@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,18 +18,32 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,7 +85,14 @@ private fun BudgetApp(repository: BudgetRepository, context: android.content.Con
     var editingExpense by remember { mutableStateOf<Pair<String, Expense>?>(null) }
     var addingToCategory by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var selectedCategoryName by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(budget) {
+        if (selectedCategoryName == null && budget != null) {
+            selectedCategoryName = budget?.categories?.firstOrNull()?.name
+        }
+    }
 
     fun persist(updated: Budget) {
         budget = updated
@@ -97,6 +119,8 @@ private fun BudgetApp(repository: BudgetRepository, context: android.content.Con
             else -> BudgetScreen(
                 budget = budget!!,
                 saving = saving,
+                selectedCategoryName = selectedCategoryName,
+                onCategorySelect = { selectedCategoryName = it },
                 onEditBudget = { editingBudget = true },
                 onAddExpense = { addingToCategory = it },
                 onEditExpense = { category, expense -> editingExpense = category to expense },
@@ -145,37 +169,110 @@ private fun ErrorState(message: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BudgetScreen(
     budget: Budget,
     saving: Boolean,
+    selectedCategoryName: String?,
+    onCategorySelect: (String) -> Unit,
     onEditBudget: () -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
     onDeleteExpense: (String, Expense) -> Unit
 ) {
-    LazyColumn(
-        Modifier.fillMaxSize().safeDrawingPadding(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Presupuesto personal", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Text(budget.monthLabel, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("Tu mes, en números claros", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
+                actions = {
+                    if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp)
+                    IconButton(onClick = onEditBudget) { Icon(Icons.Default.Edit, "Editar presupuesto") }
+                    selectedCategoryName?.let { name ->
+                        IconButton(onClick = { onAddExpense(name) }) { Icon(Icons.Default.Add, "Agregar gasto") }
+                    }
+                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.AutoMirrored.Filled.List, "Categorías") }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        budget.categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category.name) },
+                                onClick = {
+                                    onCategorySelect(category.name)
+                                    menuExpanded = false
+                                }
+                            )
+                        }
+                    }
                 }
-                if (saving) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else TextButton(onClick = onEditBudget) { Text("Editar") }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+        ) {
+            BalanceCard(budget, onEditBudget)
+            Spacer(Modifier.height(12.dp))
+            MetricsRow(budget)
+            Spacer(Modifier.height(12.dp))
+            DebtCard(budget)
+            Spacer(Modifier.height(16.dp))
+
+            val selectedCategory = budget.categories.find { it.name == selectedCategoryName }
+            if (selectedCategory != null) {
+                Text(
+                    text = selectedCategory.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    item {
+                        CategoryCardContent(selectedCategory, onEditExpense, onDeleteExpense)
+                    }
+                }
+            } else {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text("Selecciona una categoría", style = MaterialTheme.typography.bodyLarge)
+                }
             }
         }
-        item { BalanceCard(budget, onEditBudget) }
-        item { MetricsRow(budget) }
-        item { DebtCard(budget) }
-        item { Text("Gastos por categoría", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
-        items(budget.categories, key = { it.name }) { category ->
-            CategoryCard(category, onAddExpense, onEditExpense, onDeleteExpense)
+    }
+}
+
+@Composable
+private fun CategoryCardContent(
+    category: Category,
+    onEdit: (String, Expense) -> Unit,
+    onDelete: (String, Expense) -> Unit
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                if (category.cashExpense) "Gasto de caja" else "Compra a crédito",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            category.rows.forEach { expense ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(expense.label, style = MaterialTheme.typography.bodyLarge)
+                        Text("Bs ${expense.amountBs.display()}  ·  $ ${expense.amountUsd.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { onEdit(category.name, expense) }) { Icon(Icons.Default.Edit, "Editar", modifier = Modifier.size(20.dp)) }
+                    IconButton(onClick = { onDelete(category.name, expense) }) { Icon(Icons.Default.Delete, "Borrar", modifier = Modifier.size(20.dp)) }
+                }
+            }
+            HorizontalDivider()
+            Text("Total  Bs ${category.totalBs.display()}  ·  $ ${category.totalUsd.display()}", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -215,63 +312,48 @@ private fun MetricCard(label: String, value: String, modifier: Modifier) {
 @Composable
 private fun DebtCard(budget: Budget) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Deuda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Bs ${budget.debtBs.display()}", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
-            Text("Incluye compras a crédito del mes", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            budget.debts.forEach { debt -> Text("${debt.label}: Bs ${debt.remainingBs.display()}") }
-        }
-    }
-}
-
-@Composable
-private fun CategoryCard(
-    category: Category,
-    onAdd: (String) -> Unit,
-    onEdit: (String, Expense) -> Unit,
-    onDelete: (String, Expense) -> Unit
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(category.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(if (category.cashExpense) "Gasto de caja" else "Compra a crédito", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                TextButton(onClick = { onAdd(category.name) }) { Text("Agregar") }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Deuda", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("Bs ${budget.debtBs.display()}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
             }
-            category.rows.forEach { expense ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(expense.label, style = MaterialTheme.typography.bodyLarge)
-                        Text("Bs ${expense.amountBs.display()}  ·  $ ${expense.amountUsd.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    TextButton(onClick = { onEdit(category.name, expense) }) { Text("Editar") }
-                    TextButton(onClick = { onDelete(category.name, expense) }) { Text("Borrar") }
-                }
+            Text("Incluye compras a crédito del mes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            budget.debts.forEach { debt ->
+                Text("${debt.label}: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall)
             }
-            HorizontalDivider()
-            Text("Total  Bs ${category.totalBs.display()}  ·  $ ${category.totalUsd.display()}", fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
 private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (Budget) -> Unit) {
-    var income by remember { mutableStateOf(budget.incomeBs.toPlainString()) }
+    var income by remember { mutableStateOf("") }
     var rate by remember { mutableStateOf(budget.incomeRate.toPlainString()) }
     var conversion by remember { mutableStateOf(budget.conversionBs.toPlainString()) }
+    var isAdditive by remember { mutableStateOf(false) }
     var invalid by remember { mutableStateOf(false) }
+
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Editar resumen") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            MoneyField("Ingreso en Bs", income) { income = it }
+            MoneyField(if (isAdditive) "Monto a añadir" else "Ingreso total en Bs", income) { income = it }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = isAdditive, onCheckedChange = { isAdditive = it })
+                Text("Sumar al ingreso actual (Bs ${budget.incomeBs.display()})", style = MaterialTheme.typography.bodyMedium)
+            }
             MoneyField("Tasa del ingreso", rate) { rate = it }
             MoneyField("Conversión en Bs", conversion) { conversion = it }
             if (invalid) Text("Usa números válidos y valores no negativos.", color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { Button(onClick = {
-        val values = listOf(income, rate, conversion).mapNotNull { it.toBigDecimalOrNull() }
-        if (values.size == 3 && values.all { it.signum() >= 0 }) onSave(budget.copy(incomeBs = values[0], incomeRate = values[1], conversionBs = values[2])) else invalid = true
+        val parsedIncome = income.toBigDecimalOrNull() ?: if (isAdditive) BigDecimal.ZERO else budget.incomeBs
+        val parsedRate = rate.toBigDecimalOrNull()
+        val parsedConversion = conversion.toBigDecimalOrNull()
+
+        if (parsedRate != null && parsedConversion != null && parsedRate.signum() >= 0 && parsedConversion.signum() >= 0 && parsedIncome.signum() >= 0) {
+            val finalIncome = if (isAdditive) budget.incomeBs + parsedIncome else parsedIncome
+            onSave(budget.copy(incomeBs = finalIncome, incomeRate = parsedRate, conversionBs = parsedConversion))
+        } else invalid = true
     }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 
