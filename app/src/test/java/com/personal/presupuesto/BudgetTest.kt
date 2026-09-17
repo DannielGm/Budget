@@ -30,4 +30,27 @@ class BudgetTest {
         val budget = Budget("Septiembre", n("100"), n("0"), n("0"), emptyList())
         assertNull(budget.balanceUsd)
     }
+
+    @Test fun dateFilterMatchesSameDayIgnoringTime() {
+        val day = 1725177600000L // 2024-09-01 00:00 UTC (approx)
+        val budget = Budget(
+            "Septiembre",
+            n("1000"),
+            n("10"),
+            n("0"),
+            listOf(
+                Category(
+                    "HOGAR",
+                    true,
+                    listOf(
+                        Expense("1", "Internet", n("200"), n("20"), day),
+                        Expense("2", "Agua", n("50"), n("5"), day + 3L * 60 * 60 * 1000)
+                    )
+                )
+            )
+        )
+        val filtered = budget.filteredCategories(day + 12L * 60 * 60 * 1000)
+        assertEquals(1, filtered.size)
+        assertEquals(2, filtered.first().rows.size)
+    }
 }

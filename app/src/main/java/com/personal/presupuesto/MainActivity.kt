@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
@@ -34,6 +38,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +54,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,8 +69,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.Calendar as JavaCalendar
 import com.personal.presupuesto.data.BudgetDatabase
 import com.personal.presupuesto.data.BudgetRepository
 import com.personal.presupuesto.ui.theme.PresupuestoTheme
@@ -91,15 +104,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkTheme: Boolean, onThemeToggle: () -> Unit) {
     var budget by remember { mutableStateOf<Budget?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var editingBudget by remember { mutableStateOf(false) }
+    var editingDebt by remember { mutableStateOf<Debt?>(null) }
     var editingExpense by remember { mutableStateOf<Pair<String, Expense>?>(null) }
     var addingToCategory by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var selectedCategoryName by remember { mutableStateOf<String?>(null) }
+    var dateFilter by remember { mutableStateOf<Long?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -155,22 +172,41 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                 saving = saving,
                 selectedCategoryName = selectedCategoryName,
                 isDarkTheme = isDarkTheme,
+                dateFilter = dateFilter,
                 onThemeToggle = onThemeToggle,
                 onCategorySelect = { selectedCategoryName = it },
+                onDateFilterChange = { dateFilter = it },
                 onEditBudget = { editingBudget = true },
+                onEditDebt = { editingDebt = it },
                 onAddExpense = { addingToCategory = it },
                 onEditExpense = { category, expense -> editingExpense = category to expense },
                 onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
-                onFillMockData = { fillMockData() }
+                onFillMockData = { fillMockData() },
+                onOpenDatePicker = { showDatePicker = true }
             )
         }
     }
+
+    DateFilterPicker(
+        show = showDatePicker,
+        onDismiss = { showDatePicker = false },
+        onSelect = { selected ->
+            dateFilter = selected
+            showDatePicker = false
+        }
+    )
 
     budget?.let { current ->
         if (editingBudget) {
             BudgetEditorDialog(current, onDismiss = { editingBudget = false }) {
                 editingBudget = false
                 persist(it)
+            }
+        }
+        editingDebt?.let { debt ->
+            DebtEditorDialog(debt, onDismiss = { editingDebt = null }) {
+                editingDebt = null
+                persist(current.replaceDebt(it))
             }
         }
         editingExpense?.let { (category, expense) ->
@@ -185,6 +221,28 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                 persist(current.addExpense(category, it))
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateFilterPicker(show: Boolean, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
+    if (!show) return
+    val pickerState = rememberDatePickerState()
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    pickerState.selectedDateMillis?.let(onSelect)
+                }
+            ) { Text("Listo") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    ) {
+        DatePicker(state = pickerState, title = null)
     }
 }
 
@@ -213,13 +271,17 @@ private fun BudgetScreen(
     saving: Boolean,
     selectedCategoryName: String?,
     isDarkTheme: Boolean,
+    dateFilter: Long?,
     onThemeToggle: () -> Unit,
     onCategorySelect: (String) -> Unit,
+    onDateFilterChange: (Long?) -> Unit,
     onEditBudget: () -> Unit,
+    onEditDebt: (Debt) -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
     onDeleteExpense: (String, Expense) -> Unit,
-    onFillMockData: () -> Unit
+    onFillMockData: () -> Unit,
+    onOpenDatePicker: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -227,8 +289,13 @@ private fun BudgetScreen(
         topBar = {
             TopAppBar(
                 title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                ),
                 actions = {
-                    if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp)
+                    if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp, color = Color.White)
                     IconButton(onClick = onThemeToggle) {
                         Icon(if (isDarkTheme) Icons.Default.Star else Icons.Default.Settings, "Toggle Theme")
                     }
@@ -267,12 +334,44 @@ private fun BudgetScreen(
             Spacer(Modifier.height(12.dp))
             MetricsRow(budget)
             Spacer(Modifier.height(12.dp))
-            BudgetGraph(budget, Modifier.height(120.dp).fillMaxWidth())
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Flujo del mes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (dateFilter != null) {
+                                Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter)), style = MaterialTheme.typography.labelMedium)
+                                TextButton(onClick = { onDateFilterChange(null) }) { Text("Limpiar") }
+                            } else {
+                                TextButton(onClick = onOpenDatePicker) { Text("Filtrar fecha") }
+                            }
+                        }
+                    }
+                    BudgetGraph(
+                        budget = budget,
+                        modifier = Modifier
+                            .height(120.dp)
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { onOpenDatePicker() })
+                            },
+                        dateFilter = dateFilter
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
-            DebtCard(budget)
+            DebtCard(budget, onEditDebt)
             Spacer(Modifier.height(16.dp))
 
-            val selectedCategory = budget.categories.find { it.name == selectedCategoryName }
+            val filteredCategories = budget.filteredCategories(dateFilter)
+            val selectedCategory = filteredCategories.find { it.name == selectedCategoryName } ?: filteredCategories.firstOrNull()
             if (selectedCategory != null) {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
@@ -285,7 +384,7 @@ private fun BudgetScreen(
                 }
             } else {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text("Selecciona una categoría", style = MaterialTheme.typography.bodyLarge)
+                    Text(if (dateFilter != null) "No hay gastos en esa fecha" else "Selecciona una categoría", style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
@@ -293,8 +392,8 @@ private fun BudgetScreen(
 }
 
 @Composable
-private fun BudgetGraph(budget: Budget, modifier: Modifier) {
-    val expenses = budget.categories.flatMap { it.rows }.sortedBy { it.timestamp }
+private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = null) {
+    val expenses = (if (dateFilter == null) budget.categories else budget.filteredCategories(dateFilter)).flatMap { it.rows }.sortedBy { it.timestamp }
     val income = budget.incomeBs
     val conversion = budget.conversionBs
 
@@ -303,7 +402,8 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier) {
         val points = mutableListOf<BigDecimal>()
         points.add(currentBalance)
         expenses.forEach {
-            if (budget.categories.find { c -> c.rows.contains(it) }?.cashExpense == true) {
+            val category = budget.categories.find { c -> c.rows.any { row -> row.id == it.id } }
+            if (category?.cashExpense == true) {
                 currentBalance -= it.amountBs
             }
             points.add(currentBalance)
@@ -314,12 +414,33 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier) {
     if (dataPoints.isEmpty()) return
 
     val primaryColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val gridColorSecondary = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
     Canvas(modifier.padding(8.dp)) {
         val width = size.width
         val height = size.height
         val maxVal = dataPoints.maxOf { it }.toFloat().coerceAtLeast(1f)
         val minVal = dataPoints.minOf { it }.toFloat()
         val range = (maxVal - minVal).coerceAtLeast(1f)
+
+        for (i in 0..4) {
+            val y = (height / 4f) * i
+            drawLine(
+                color = gridColor,
+                start = androidx.compose.ui.geometry.Offset(0f, y),
+                end = androidx.compose.ui.geometry.Offset(width, y),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+        for (i in 0..5) {
+            val x = (width / 5f) * i
+            drawLine(
+                color = gridColorSecondary,
+                start = androidx.compose.ui.geometry.Offset(x, 0f),
+                end = androidx.compose.ui.geometry.Offset(x, height),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
 
         val path = Path()
         dataPoints.forEachIndexed { i, valRow ->
@@ -352,10 +473,20 @@ private fun CategoryCardContent(
                 IconButton(onClick = { onAdd(category.name) }) { Icon(Icons.Default.Add, "Agregar") }
             }
             category.rows.forEach { expense ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onEdit(category.name, expense) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Column(Modifier.weight(1f)) {
                         Text(expense.label, style = MaterialTheme.typography.bodyLarge)
                         Text("Bs ${expense.amountBs.display()}  ·  $ ${expense.amountUsd.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(expense.timestamp))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     IconButton(onClick = { onEdit(category.name, expense) }) { Icon(Icons.Default.Edit, "Editar", modifier = Modifier.size(20.dp)) }
                     IconButton(onClick = { onDelete(category.name, expense) }) { Icon(Icons.Default.Delete, "Borrar", modifier = Modifier.size(20.dp)) }
@@ -400,7 +531,7 @@ private fun MetricCard(label: String, value: String, modifier: Modifier) {
 }
 
 @Composable
-private fun DebtCard(budget: Budget) {
+private fun DebtCard(budget: Budget, onEdit: (Debt) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -410,7 +541,12 @@ private fun DebtCard(budget: Budget) {
             }
             Text("Incluye compras a crédito del mes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             budget.debts.forEach { debt ->
-                Text("${debt.label}: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("${debt.label}: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { onEdit(debt) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Editar deuda", modifier = Modifier.size(18.dp))
+                    }
+                }
             }
         }
     }
@@ -447,25 +583,104 @@ private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (B
     }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: () -> Unit, onSave: (Expense) -> Unit) {
     var label by remember { mutableStateOf(expense?.label.orEmpty()) }
     var amount by remember { mutableStateOf(expense?.amountBs?.toPlainString().orEmpty()) }
     var rate by remember { mutableStateOf(expense?.rate?.toPlainString().orEmpty()) }
+    var timestamp by remember { mutableStateOf(expense?.timestamp ?: System.currentTimeMillis()) }
+    var timestampText by remember {
+        mutableStateOf(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp)))
+    }
     var invalid by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    if (showDatePicker) {
+        val dateState = rememberDatePickerState(timestamp)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { selected ->
+                        val current = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(timestampText) ?: Date(selected)
+                        val calendar = JavaCalendar.getInstance().apply {
+                            time = current
+                            set(JavaCalendar.YEAR, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.YEAR))
+                            set(JavaCalendar.MONTH, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.MONTH))
+                            set(JavaCalendar.DAY_OF_MONTH, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.DAY_OF_MONTH))
+                        }
+                        timestamp = calendar.timeInMillis
+                        timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(calendar.time)
+                    }
+                    showDatePicker = false
+                }) { Text("Guardar fecha") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancelar") } }
+        ) {
+            DatePicker(state = dateState)
+        }
+    }
+
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (expense == null) "Nuevo gasto" else "Editar gasto") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(category, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             OutlinedTextField(label = { Text("Descripción") }, value = label, onValueChange = { label = it }, singleLine = true)
             MoneyField("Monto en Bs", amount) { amount = it }
             MoneyField("Tasa", rate) { rate = it }
+            Text("Fecha de creación: ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))}")
+            OutlinedTextField(
+                value = timestampText,
+                onValueChange = { timestampText = it },
+                label = { Text("Fecha y hora (yyyy-MM-dd HH:mm)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(onClick = { showDatePicker = true }) { Text("Elegir fecha") }
+            Button(onClick = { val now = System.currentTimeMillis(); timestamp = now; timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(now)) }) { Text("Usar fecha actual") }
             if (invalid) Text("Completa la descripción y usa valores válidos.", color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { Button(onClick = {
         val parsedAmount = amount.toBigDecimalOrNull()
         val parsedRate = rate.toBigDecimalOrNull()
-        if (label.isNotBlank() && parsedAmount != null && parsedRate != null && parsedAmount.signum() >= 0 && parsedRate.signum() >= 0) onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, parsedRate)) else invalid = true
+        val parsedTimestamp = try {
+            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(timestampText)?.time ?: timestamp
+        } catch (_: Exception) { timestamp }
+        if (label.isNotBlank() && parsedAmount != null && parsedRate != null && parsedAmount.signum() >= 0 && parsedRate.signum() >= 0) onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, parsedRate, parsedTimestamp)) else invalid = true
     }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+}
+
+@Composable
+private fun DebtEditorDialog(debt: Debt, onDismiss: () -> Unit, onSave: (Debt) -> Unit) {
+    var label by remember { mutableStateOf(debt.label) }
+    var opening by remember { mutableStateOf(debt.openingBs.toPlainString()) }
+    var payment by remember { mutableStateOf(debt.paymentBs.toPlainString()) }
+    var invalid by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Editar deuda") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(label = { Text("Nombre") }, value = label, onValueChange = { label = it }, singleLine = true)
+                MoneyField("Saldo inicial en Bs", opening) { opening = it }
+                MoneyField("Pago realizado en Bs", payment) { payment = it }
+                if (invalid) Text("Usa valores válidos y no negativos.", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val openingValue = opening.toBigDecimalOrNull()
+                val paymentValue = payment.toBigDecimalOrNull()
+                if (label.isNotBlank() && openingValue != null && paymentValue != null && openingValue.signum() >= 0 && paymentValue.signum() >= 0) {
+                    onSave(Debt(label.trim(), openingValue, paymentValue))
+                } else {
+                    invalid = true
+                }
+            }) { Text("Guardar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+    )
 }
 
 @Composable
@@ -484,3 +699,5 @@ private fun Budget.addExpense(categoryName: String, expense: Expense): Budget = 
 private fun Budget.withoutExpense(categoryName: String, expenseId: String): Budget = copy(categories = categories.map { category ->
     if (category.name == categoryName) category.copy(rows = category.rows.filterNot { it.id == expenseId }) else category
 })
+
+private fun Budget.replaceDebt(replacement: Debt): Budget = copy(debts = debts.map { if (it.label == replacement.label) replacement else it })

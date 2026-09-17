@@ -2,10 +2,19 @@ package com.personal.presupuesto
 
 import java.math.BigDecimal
 import java.math.MathContext
+import java.util.Calendar
 
 private val moneyContext = MathContext.DECIMAL128
 fun convert(amount: BigDecimal, rate: BigDecimal): BigDecimal =
     if (rate.signum() == 0) BigDecimal.ZERO else amount.divide(rate, moneyContext)
+
+private fun Long.sameDayAs(other: Long): Boolean {
+    val first = Calendar.getInstance().apply { timeInMillis = this@sameDayAs }
+    val second = Calendar.getInstance().apply { timeInMillis = other }
+    return first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
+        first.get(Calendar.MONTH) == second.get(Calendar.MONTH) &&
+        first.get(Calendar.DAY_OF_MONTH) == second.get(Calendar.DAY_OF_MONTH)
+}
 
 data class Expense(
     val id: String,
@@ -42,4 +51,11 @@ data class Budget(
     val balanceBs: BigDecimal get() = incomeBs - cashBs - conversionBs
     // September K6 is unguarded, unlike row conversion formulas. Show unavailable at zero rate.
     val balanceUsd: BigDecimal? get() = if (incomeRate.signum() == 0) null else convert(balanceBs, incomeRate)
+
+    fun filteredCategories(dateFilter: Long?): List<Category> {
+        if (dateFilter == null) return categories
+        return categories.map { category ->
+            category.copy(rows = category.rows.filter { expense -> expense.timestamp.sameDayAs(dateFilter) })
+        }.filter { it.rows.isNotEmpty() }
+    }
 }
