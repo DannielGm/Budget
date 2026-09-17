@@ -128,7 +128,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var graphRangeDays by remember { mutableStateOf(1) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
-    var dataCleared by remember { mutableStateOf(false) }
+    var showDebtSummary by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -139,7 +139,6 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
 
     fun persist(updated: Budget) {
         budget = updated
-        dataCleared = false
         saving = true
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { repository.save(updated) } }
@@ -195,12 +194,24 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
             saving = true
             scope.launch {
                 runCatching {
-                    withContext(Dispatchers.IO) { repository.clearAll() }
+                    val cleared = current.copy(
+                        incomeBs = BigDecimal.ZERO,
+                        incomeRate = BigDecimal.ZERO,
+                        conversionBs = BigDecimal.ZERO,
+                        categories = current.categories.map { it.copy(rows = emptyList()) },
+                        debts = emptyList()
+                    )
+                    withContext(Dispatchers.IO) {
+                        repository.clearAll()
+                        repository.save(cleared)
+                    }
+                    cleared
                 }.onSuccess {
-                    budget = null
-                    dataCleared = true
+                    budget = it
                     selectedCategoryName = null
                     dateFilter = null
+                    showSummary = false
+                    showDebtSummary = false
                 }.onFailure {
                     error = "No se pudo limpiar los datos."
                 }
@@ -212,9 +223,14 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
             error != null && budget == null -> ErrorState(error!!)
-            dataCleared && budget == null -> EmptyState()
             budget == null -> LoadingState()
-            else -> if (showSummary) {
+            else -> if (showDebtSummary) {
+                DebtSummaryScreen(
+                    budget = budget!!,
+                    onBack = { showDebtSummary = false },
+                    onEditDebt = { editingDebt = it }
+                )
+            } else if (showSummary) {
                 BudgetSummaryScreen(budget = budget!!, onBack = { showSummary = false })
             } else {
                 BudgetScreen(
@@ -233,6 +249,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     },
                     onEditBudget = { editingBudget = true },
                     onOpenSummary = { showSummary = true },
+                    onOpenDebtSummary = { showDebtSummary = true },
                     onEditDebt = { editingDebt = it },
                     onAddExpense = { addingToCategory = it },
                     onEditExpense = { category, expense -> editingExpense = category to expense },
@@ -350,6 +367,7 @@ private fun BudgetScreen(
     onRangeChange: (Int) -> Unit,
     onEditBudget: () -> Unit,
     onOpenSummary: () -> Unit,
+    onOpenDebtSummary: () -> Unit,
     onEditDebt: (Debt) -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
@@ -459,7 +477,7 @@ private fun BudgetScreen(
                 }
             }
             Spacer(Modifier.height(14.dp))
-            DebtCard(budget, onEditDebt)
+            DebtCard(budget, onOpenDebtSummary)
             Spacer(Modifier.height(16.dp))
 
             val filteredCategories = budget.filteredCategories(dateFilter, graphRangeDays)
@@ -695,20 +713,68 @@ private fun MetricCard(label: String, value: String, modifier: Modifier) {
 }
 
 @Composable
-private fun DebtCard(budget: Budget, onEdit: (Debt) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenSummary)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Deuda", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 Text("Bs ${budget.debtBs.display()}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
             }
-            Text("Incluye compras a crédito del mes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            budget.debts.forEach { debt ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("${debt.label}: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onEdit(debt) }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar deuda", modifier = Modifier.size(18.dp))
+            Text("Toca para ver el detalle", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DebtSummaryScreen(
+    budget: Budget,
+    onBack: () -> Unit,
+    onEditDebt: (Debt) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Resumen de deuda", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MetricCard("Deuda total", "Bs ${budget.debtBs.display()}", Modifier.fillMaxWidth())
+            if (budget.debts.isEmpty()) {
+                Text("No hay deudas registradas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                budget.debts.forEach { debt ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(debt.label, fontWeight = FontWeight.SemiBold)
+                                Text("Saldo restante: Bs ${debt.remainingBs.display()}", style = MaterialTheme.typography.bodySmall)
+                                Text("Inicial: Bs ${debt.openingBs.display()}  ·  Pagado: Bs ${debt.paymentBs.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { onEditDebt(debt) }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Editar deuda")
+                            }
+                        }
                     }
                 }
             }
