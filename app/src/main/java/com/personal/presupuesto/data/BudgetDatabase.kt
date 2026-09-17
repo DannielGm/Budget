@@ -152,7 +152,8 @@ class BudgetRepository(private val database: BudgetDatabase) {
         loadOrCreate(com.personal.presupuesto.currentMonthId(), template)
     }
 
-    // Historical months are created by recorded data; startup also creates the current month.
+    // Historical months are created by confirmed calendar navigation or recorded data.
+    // Startup also creates the current month when missing.
     // Categories are carried over by name and type; amounts, debts, and income stay at zero.
     suspend fun loadOrCreate(monthId: String, template: Budget): Budget {
         require(!isFutureMonth(monthId)) { "No se pueden crear meses futuros" }

@@ -98,6 +98,17 @@ Room stores each month in the app's private database. This is persistence, not e
 - Added regression tests for empty-current-month startup, preservation of historical and existing current-month data, no reseed after clear-all, calendar UTC round-trips across year boundaries and time zones, and selectable-day rules (18 tests total).
 - App version: `0.4.2.2` (`versionCode=5`). No database schema change or data reset.
 
+### Phase 4.2.5 — Calendar and shared-button migration
+- The month-label calendar accepts past dates and today without requiring stored data; future dates remain disabled.
+- “Ver día” opens/creates the selected month and filters both graph and expenses to the selected day. “Ver mes” opens the month overview and clears the day filter. Cancel does not load or create a month.
+- Removed the graph's separate calendar popup. Reopening the month calendar restores the active day, or the displayed month's first day in overview mode.
+- 1d uses the reference day; 7d includes its preceding six days clipped at month start; “30d” is now “Mes” and includes the selected calendar month. Choosing a short range from overview defaults to that month's first day rather than today's month.
+- Added a time-zone regression test for range boundaries. No database schema change or data reset.
+- Migrated shared filled, text, and outlined buttons and the month calendar dialog to Compose Unstyled 2.9.2. Material3 still supplies theme tokens, text, fields, cards, other dialogs, and the expense date picker; this is an incremental migration, not a complete Material3 replacement.
+- Upgraded to AGP 9.1.1, Gradle 9.3.1, Kotlin 2.4.0, KSP 2.3.12, Compose BOM 2026.09.00, and compile SDK 37 (target SDK remains 35). AGP compatibility flags currently emit deprecation warnings.
+- Opening the calendar gives initial focus to its heading, not the year editor, so the keyboard stays hidden until the user taps the year field.
+- App version: `0.4.2.5` (`versionCode=6`). The migration build passed 19 unit tests and ten emulator acceptance assertions for day selection, future-date rejection, confirmation, and historical-month navigation. Two additional emulator checks verified the year field stays unfocused with the keyboard hidden on open, then gains focus and shows the keyboard when tapped.
+
 ## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.3 — Carry-forward logic
@@ -131,9 +142,31 @@ Room stores each month in the app's private database. This is persistence, not e
 - Confirm business logic and UX remain stable after the new-month and export work.
 - Finalize documentation, deployment notes, and the handoff checklist for the finished app.
 
+## Build and current-phase checks
+
+Use JDK 17 and Android SDK platform 37. Configure the local SDK in `E:\Projects\Presupuesto\local.properties` and run from `E:\Projects\Presupuesto`:
+
+```bat
+gradlew.bat :app:testDebugUnitTest :app:assembleDebug --console=plain
+```
+
+The private seed must be supplied locally; it is not committed. The debug APK is written to `E:\Projects\Presupuesto\app\build\outputs\apk\debug\app-debug.apk`. Do not publish it: it contains the private seed.
+
+Calendar smoke-check checklist:
+- Open the month calendar: the year field must not be focused and the keyboard must stay hidden.
+- Tap the year field: it must remain editable and the keyboard must open.
+- Select a past day, then try a future day: only the past day should remain selected.
+- Confirm with “Ver día”, reopen, and verify the selected day is restored.
+- Confirm with “Ver mes” to return to the overview; browse and confirm a historical month, then return to the current month.
+- Cancel browsing without confirming: the dashboard month must remain unchanged.
+
+The recorded emulator checks are smoke checks, not a committed automated Compose UI test suite. Broader accessibility, screen-size, and lifecycle coverage remains pending. Remaining style migration includes fields, cards, other dialogs, and the expense date picker; carry-forward business rules remain Phase 4.3 work.
+
 ## Verification status
 
-Phase 4.2.2 (`versionName=0.4.2.2`, `versionCode=5`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17. The test report records 18 tests, zero failures or errors; the final incremental build also succeeded. Interactive verification remains pending: APK installation could not proceed because `emulator-5554` was unavailable, and the restarted emulator remained offline during the checks. Calendar interaction and cold-start behavior have not been verified on-device for this version. No emulator data was cleared.
+Phase 4.2.5 (`versionName=0.4.2.5`, `versionCode=6`) passed `:app:testDebugUnitTest :app:assembleDebug` on 2026-09-17 with 19 tests, zero failures or errors. On `emulator-5554` (API 37) the APK installed and cold-launched, and a scripted acceptance passed all assertions: calendar opens from the month label; tapping a valid day updates the active day; tapping a future day is ignored; "Ver día" closes the dialog and the day filter is restored on reopen; "Ver mes" closes the dialog; browsing to empty August and confirming opens it; navigating forward and confirming restores September. Crash-buffer entries inspected belong to the emulator UWB service, not the app. No emulator data was cleared.
+
+Phase 4.2.2 (`versionName=0.4.2.2`, `versionCode=5`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17 with 18 tests, zero failures/errors. Subsequent emulator verification completed successfully: install succeeded; the month label opened the calendar; August opened and reopened on August; July and future September dates were disabled; cancellation left the month unchanged; a cold restart returned to September even with an empty budget. Crash-buffer entries belonged to the emulator UWB service, not the app. No emulator data was cleared.
 
 Phase 4.2.1 (`versionName=0.4.2.1`, `versionCode=4`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17: 13 tests, zero failures or errors. The debug APK was installed on `emulator-5554` and its version verified. Interactive checks confirmed the arrow is visible with one stored month, the single-month menu opens and closes on selection, a past-dated expense implicitly creates August, the menu lists September before August, switching both ways shows isolated data, and the selector works after a cold restart. The temporary `Phase421Check` expense was deleted; the empty August month remains. These are emulator checks, not automated Compose UI tests. Clearing flows were not retested in this bugfix.
 

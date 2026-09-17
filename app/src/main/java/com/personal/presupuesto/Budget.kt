@@ -44,9 +44,9 @@ fun pickerStartOfMonth(monthId: String): Long {
     }.timeInMillis
 }
 
+@Suppress("UNUSED_PARAMETER") // Retained during the calendar UI migration.
 fun isSelectableBudgetDay(utcTimeMillis: Long, storedMonthIds: Set<String>): Boolean =
-    isSelectableDay(utcTimeMillis) &&
-        (monthIdFromPicker(utcTimeMillis) == currentMonthId() || monthIdFromPicker(utcTimeMillis) in storedMonthIds)
+    isSelectableDay(utcTimeMillis)
 
 fun currentMonthId(): String = monthIdOf(System.currentTimeMillis())
 
@@ -163,7 +163,7 @@ data class Budget(
             if (rangeDays >= 30) {
                 set(Calendar.DAY_OF_MONTH, 1)
             } else {
-                add(Calendar.DAY_OF_MONTH, -(rangeDays.coerceAtLeast(1) - 1))
+                set(Calendar.DAY_OF_MONTH, (get(Calendar.DAY_OF_MONTH) - rangeDays.coerceAtLeast(1) + 1).coerceAtLeast(1))
             }
         }.timeInMillis
         val end = Calendar.getInstance().apply {

@@ -283,15 +283,34 @@ class BudgetTest {
         } finally { TimeZone.setDefault(original) }
     }
 
-    @Test fun budgetCalendarAllowsOnlyStoredMonthsAndCurrentPastOrPresentDays() {
+    @Test fun budgetCalendarAllowsUnstoredPastDatesAndTodayButNotFuture() {
         val past = monthIdMonthsAhead(-1)
         assertTrue(isSelectableBudgetDay(pickerStartOfMonth(past), setOf(past)))
-        assertFalse(isSelectableBudgetDay(pickerStartOfMonth(past), emptySet()))
+        assertTrue(isSelectableBudgetDay(pickerStartOfMonth(past), emptySet()))
         assertTrue(isSelectableBudgetDay(pickerStartOfMonth(currentMonthId()), emptySet()))
         assertTrue(isSelectableBudgetDay(utcMidnightOfLocalDate(0), emptySet()))
         assertFalse(isSelectableBudgetDay(utcMidnightOfLocalDate(1), setOf(currentMonthId())))
         val future = monthIdMonthsAhead(1)
         assertFalse(isSelectableBudgetDay(pickerStartOfMonth(future), setOf(future)))
+    }
+
+    @Test fun calendarRangesStayInsideSelectedMonthAcrossTimeZones() {
+        val original = TimeZone.getDefault()
+        try {
+            for (zone in listOf("America/Los_Angeles", "Pacific/Kiritimati", "UTC")) {
+                TimeZone.setDefault(TimeZone.getTimeZone(zone))
+                val dates = listOf("2024-02-29 23:59", "2024-03-01 00:00", "2024-03-03 23:59", "2024-03-04 00:00", "2024-03-31 23:59", "2024-04-01 00:00")
+                val rows = dates.mapIndexed { index, date -> Expense(index.toString(), date, n("1"), n("1"), parseExpenseTimestamp(date)!!) }
+                val budget = Budget("Marzo", n("0"), n("0"), n("0"), listOf(Category("HOGAR", true, rows)), monthId = "2024-03")
+                val reference = parseExpenseTimestamp("2024-03-03 12:00")!!
+                fun ids(days: Int) = budget.filteredCategories(reference, days).flatMap { it.rows }.map { it.id }
+                assertEquals(listOf("2"), ids(1))
+                assertEquals(listOf("1", "2"), ids(7))
+                assertEquals(listOf("1", "2", "3", "4"), ids(30))
+                assertEquals(budget.categories, budget.filteredCategories(null))
+                assertEquals("2024-03", monthIdFromPicker(pickerDateFromLocal(reference)))
+            }
+        } finally { TimeZone.setDefault(original) }
     }
 
     @Test fun typedDatesAreStrictAndPickerPreservesLocalDay() {

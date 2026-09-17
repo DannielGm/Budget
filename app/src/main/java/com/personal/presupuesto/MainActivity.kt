@@ -43,7 +43,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import com.personal.presupuesto.ui.theme.BudgetButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -58,12 +58,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import com.personal.presupuesto.ui.theme.BudgetOutlinedButton as OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.personal.presupuesto.ui.theme.BudgetTextButton as TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.SelectableDates
@@ -136,7 +136,6 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var selectedCategoryName by remember { mutableStateOf<String?>(null) }
     var dateFilter by remember { mutableStateOf<Long?>(null) }
     var graphRangeDays by remember { mutableStateOf(1) }
-    var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showDebtSummary by remember { mutableStateOf(false) }
     var months by remember { mutableStateOf<List<MonthSummary>>(emptyList()) }
@@ -257,30 +256,29 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         }
     }
 
-    fun switchMonth(monthId: String) {
+    fun switchMonth(monthId: String, selectedDay: Long?) {
         val current = budget ?: return
-        if (saving || current.monthId == monthId) return
+        if (saving || isFutureMonth(monthId)) return
+        if (current.monthId == monthId) {
+            dateFilter = selectedDay
+            graphRangeDays = if (selectedDay == null) 30 else 1
+            return
+        }
         saving = true
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val selected = if (monthId == currentMonthId()) repository.loadOrCreate(monthId, current)
-                        else repository.load(monthId)
-                    selected to repository.listMonths()
+                    repository.loadOrCreate(monthId, current) to repository.listMonths()
                 }
-            }
-                .onSuccess { (selected, stored) ->
-                    if (selected != null) {
-                        budget = selected
-                        months = stored
-                        selectedCategoryName = null
-                        dateFilter = null
-                        graphRangeDays = 1
-                        showSummary = false
-                        showDebtSummary = false
-                    }
-                }
-                .onFailure { error = "No se pudo cargar el mes seleccionado." }
+            }.onSuccess { (selected, stored) ->
+                budget = selected
+                months = stored
+                selectedCategoryName = null
+                dateFilter = selectedDay
+                graphRangeDays = if (selectedDay == null) 30 else 1
+                showSummary = false
+                showDebtSummary = false
+            }.onFailure { error = "No se pudo cargar el mes seleccionado." }
             saving = false
         }
     }
@@ -326,10 +324,12 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     graphRangeDays = graphRangeDays,
                     onThemeToggle = onThemeToggle,
                     onCategorySelect = { selectedCategoryName = it },
-                    onDateFilterChange = { dateFilter = it },
+                    onDateFilterChange = { dateFilter = it; graphRangeDays = 30 },
                     onRangeChange = { days ->
                         graphRangeDays = days
-                        if (dateFilter == null) dateFilter = System.currentTimeMillis()
+                        if (days != 30 && dateFilter == null) {
+                            dateFilter = localDateFromPicker(pickerStartOfMonth(budget!!.monthId))
+                        }
                     },
                     onEditBudget = { editingBudget = true },
                     onOpenSummary = { showSummary = true },
@@ -350,22 +350,11 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     onFillMockData = { fillMockData() },
                     onClearAllData = { confirmClearAll = true },
                     onClearCurrentMonth = { confirmClearMonth = true },
-                    months = months,
-                    onMonthSelect = { switchMonth(it) },
-                    onOpenDatePicker = { showDatePicker = true }
+                    onMonthSelect = { month, day -> switchMonth(month, day) }
                 )
             }
         }
     }
-
-    DateFilterPicker(
-        show = showDatePicker,
-        onDismiss = { showDatePicker = false },
-        onSelect = { selected ->
-            dateFilter = selected
-            showDatePicker = false
-        }
-    )
 
     budget?.let { current ->
         if (editingBudget) {
@@ -426,70 +415,9 @@ private object PastOrPresentDates : SelectableDates {
     override fun isSelectableYear(year: Int): Boolean = isPastOrPresentYear(year)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateFilterPicker(show: Boolean, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
-    if (!show) return
-    val pickerState = rememberDatePickerState(selectableDates = PastOrPresentDates)
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    pickerState.selectedDateMillis?.let { onSelect(localDateFromPicker(it)) }
-                }
-            ) { Text("Listo") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar") }
-        }
-    ) {
-        DatePicker(state = pickerState, title = null, showModeToggle = false)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun BudgetMonthPicker(monthId: String, storedMonthIds: Set<String>, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
-    val selectableDates = remember(storedMonthIds) {
-        object : SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                isSelectableBudgetDay(utcTimeMillis, storedMonthIds)
-            override fun isSelectableYear(year: Int): Boolean =
-                isPastOrPresentYear(year) &&
-                    (year == currentMonthId().substringBefore('-').toInt() ||
-                        storedMonthIds.any { it.substringBefore('-').toInt() == year })
-        }
-    }
-    val pickerState = rememberDatePickerState(
-        initialSelectedDateMillis = pickerStartOfMonth(monthId),
-        initialDisplayedMonthMillis = pickerStartOfMonth(monthId),
-        selectableDates = selectableDates
-    )
-    val selected = pickerState.selectedDateMillis
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                enabled = selected != null && isSelectableBudgetDay(selected, storedMonthIds),
-                onClick = {
-                    selected?.takeIf { isSelectableBudgetDay(it, storedMonthIds) }
-                        ?.let { onSelect(monthIdFromPicker(it)) }
-                }
-            ) { Text("Abrir mes") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
-    ) {
-        DatePicker(
-            state = pickerState,
-            title = { Text("Selecciona una fecha para abrir su mes", modifier = Modifier.padding(24.dp)) },
-            headline = {
-                Text(selected?.let { monthDisplayName(monthIdFromPicker(it)) } ?: "Seleccionar mes",
-                    modifier = Modifier.padding(horizontal = 24.dp))
-            },
-            showModeToggle = false
-        )
-    }
+private fun BudgetMonthPicker(monthId: String, activeDay: Long?, onDismiss: () -> Unit, onSelect: (String, Long?) -> Unit) {
+    com.personal.presupuesto.ui.theme.BudgetCalendar(monthId, activeDay, onDismiss, onSelect)
 }
 
 @Composable
@@ -559,9 +487,7 @@ private fun BudgetScreen(
     onFillMockData: () -> Unit,
     onClearAllData: () -> Unit,
     onClearCurrentMonth: () -> Unit,
-    months: List<MonthSummary>,
-    onMonthSelect: (String) -> Unit,
-    onOpenDatePicker: () -> Unit
+    onMonthSelect: (String, Long?) -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var showCategoryPicker by remember { mutableStateOf(false) }
@@ -584,11 +510,11 @@ private fun BudgetScreen(
                         if (showMonthPicker) {
                             BudgetMonthPicker(
                                 monthId = budget.monthId,
-                                storedMonthIds = months.map { it.monthId }.toSet(),
+                                activeDay = dateFilter,
                                 onDismiss = { showMonthPicker = false },
-                                onSelect = {
+                                onSelect = { month, day ->
                                     showMonthPicker = false
-                                    onMonthSelect(it)
+                                    onMonthSelect(month, day)
                                 }
                             )
                         }
@@ -653,10 +579,10 @@ private fun BudgetScreen(
                     ) {
                         Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
-                        listOf(1 to "1d", 7 to "7d", 30 to "30d").forEach { (days, label) ->
+                        listOf(1 to "1d", 7 to "7d", 30 to "Mes").forEach { (days, label) ->
                             FilterChip(
                                 modifier = Modifier.height(32.dp),
-                                selected = graphRangeDays == days,
+                                selected = if (dateFilter == null) days == 30 else graphRangeDays == days,
                                 onClick = { onRangeChange(days) },
                                 label = { Text(label) }
                             )
@@ -665,21 +591,18 @@ private fun BudgetScreen(
                     if (dateFilter != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "Mostrando desde ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter))}",
+                                "${if (graphRangeDays == 30) "Mes" else "${graphRangeDays}d hasta"} ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter))}",
                                 style = MaterialTheme.typography.labelMedium
                             )
                             Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { onDateFilterChange(null) }) { Text("Todo") }
+                            TextButton(onClick = { onDateFilterChange(null) }) { Text("Ver mes") }
                         }
                     }
                     BudgetGraph(
                         budget = budget,
                         modifier = Modifier
                             .height(168.dp)
-                            .fillMaxWidth()
-                            .pointerInput(Unit) {
-                                detectTapGestures(onTap = { onOpenDatePicker() })
-                            },
+                            .fillMaxWidth(),
                         dateFilter = dateFilter,
                         rangeDays = graphRangeDays
                     )

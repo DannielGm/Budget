@@ -6,13 +6,13 @@ plugins {
 }
 android {
     namespace = "com.personal.presupuesto"
-    compileSdk = 35
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.personal.presupuesto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.2.2"
+        versionCode = 6
+        versionName = "0.4.2.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -20,12 +20,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+}
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.04.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("com.composables:composeunstyled-button:2.9.2")
+    implementation("com.composables:composeunstyled-dialog:2.9.2")
+    implementation("com.composables:composeunstyled-theming:2.9.2")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("androidx.room:room-ktx:2.7.2")
