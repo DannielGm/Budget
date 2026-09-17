@@ -36,7 +36,8 @@ object SeedLoader {
                     Debt(debt.getString("label"), debt.getString("openingBs").toBigDecimal(),
                         debt.getString("paymentBs").toBigDecimal())
                 }
-            }
+            },
+            SEED_MONTH_ID
         )
     }
 }

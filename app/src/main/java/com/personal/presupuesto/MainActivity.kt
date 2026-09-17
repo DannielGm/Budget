@@ -65,6 +65,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -91,6 +92,7 @@ import java.util.Locale
 import java.util.Calendar as JavaCalendar
 import com.personal.presupuesto.data.BudgetDatabase
 import com.personal.presupuesto.data.BudgetRepository
+import com.personal.presupuesto.data.MonthSummary
 import com.personal.presupuesto.ui.theme.PresupuestoTheme
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -136,6 +138,9 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showDebtSummary by remember { mutableStateOf(false) }
+    var months by remember { mutableStateOf<List<MonthSummary>>(emptyList()) }
+    var confirmClearAll by remember { mutableStateOf(false) }
+    var confirmClearMonth by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -145,10 +150,15 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     }
 
     fun persist(updated: Budget) {
-        budget = updated
+        if (saving) return
         saving = true
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { repository.save(updated) } }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.save(updated)
+                    repository.listMonths()
+                }
+            }.onSuccess { stored -> budget = updated; months = stored }
                 .onFailure { error = "No se pudo guardar el cambio." }
             saving = false
         }
@@ -158,7 +168,14 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         runCatching {
             val seed = withContext(Dispatchers.IO) { SeedLoader.load(context) }
             withContext(Dispatchers.IO) { repository.loadOrSeed(seed) }
-        }.onSuccess { budget = it }
+            // The newest stored month wins; a fresh install only holds the seed.
+            val newest = withContext(Dispatchers.IO) { repository.listMonthIds().lastOrNull() } ?: seed.monthId
+            val loaded = withContext(Dispatchers.IO) { repository.load(newest) } ?: seed
+            loaded to withContext(Dispatchers.IO) { repository.listMonths() }
+        }.onSuccess { (loaded, stored) ->
+            budget = loaded
+            months = stored
+        }
             .onFailure { error = "No se pudo cargar el presupuesto." }
     }
 
@@ -197,21 +214,15 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     }
 
     fun clearAllData() {
+        if (saving) return
         budget?.let { current ->
             saving = true
             scope.launch {
                 runCatching {
-                    val cleared = current.copy(
-                        incomeBs = BigDecimal.ZERO,
-                        incomeRate = BigDecimal.ZERO,
-                        conversionBs = BigDecimal.ZERO,
-                        categories = current.categories.map { it.copy(rows = emptyList()) },
-                        debts = emptyList()
-                    )
-                    withContext(Dispatchers.IO) {
-                        repository.clearAll()
-                        repository.save(cleared)
+                    val cleared = withContext(Dispatchers.IO) {
+                        repository.clearAllKeepingMonth(current.monthId)
                     }
+                    months = withContext(Dispatchers.IO) { repository.listMonths() }
                     cleared
                 }.onSuccess {
                     budget = it
@@ -224,6 +235,66 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                 }
                 saving = false
             }
+        }
+    }
+
+    fun recordExpense(category: String, expense: Expense) {
+        val current = budget ?: return
+        if (saving) return
+        saving = true
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.recordExpense(current.monthId, category, expense) to repository.listMonths()
+                }
+            }.onSuccess { (updated, stored) ->
+                budget = updated
+                months = stored
+                selectedCategoryName = category
+                dateFilter = null
+                graphRangeDays = 1
+            }.onFailure { error = "No se pudo guardar el gasto." }
+            saving = false
+        }
+    }
+
+    fun switchMonth(monthId: String) {
+        val current = budget ?: return
+        if (saving || current.monthId == monthId) return
+        saving = true
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { repository.load(monthId) } }
+                .onSuccess { selected ->
+                    if (selected != null) {
+                        budget = selected
+                        selectedCategoryName = null
+                        dateFilter = null
+                        graphRangeDays = 1
+                        showSummary = false
+                        showDebtSummary = false
+                    }
+                }
+                .onFailure { error = "No se pudo cargar el mes seleccionado." }
+            saving = false
+        }
+    }
+
+    // Keeps the month in the list so its history stays comparable, but zeroes every value.
+    fun clearCurrentMonth() {
+        val current = budget ?: return
+        if (saving) return
+        saving = true
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { repository.clearMonth(current.monthId) } }
+                .onSuccess {
+                    budget = it
+                    selectedCategoryName = null
+                    dateFilter = null
+                    graphRangeDays = 1
+                    showSummary = false
+                    showDebtSummary = false
+                }.onFailure { error = "No se pudo limpiar el mes." }
+            saving = false
         }
     }
 
@@ -271,7 +342,10 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     onEditExpense = { category, expense -> editingExpense = category to expense },
                     onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
                     onFillMockData = { fillMockData() },
-                    onClearAllData = { clearAllData() },
+                    onClearAllData = { confirmClearAll = true },
+                    onClearCurrentMonth = { confirmClearMonth = true },
+                    months = months,
+                    onMonthSelect = { switchMonth(it) },
                     onOpenDatePicker = { showDatePicker = true }
                 )
             }
@@ -303,29 +377,60 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         editingExpense?.let { (category, expense) ->
             ExpenseEditorDialog(category, expense, onDismiss = { editingExpense = null }) {
                 editingExpense = null
-                persist(current.replaceExpense(category, it))
+                recordExpense(category, it)
             }
         }
         addingToCategory?.let { category ->
             ExpenseEditorDialog(category, null, onDismiss = { addingToCategory = null }) {
                 addingToCategory = null
-                persist(current.addExpense(category, it))
+                recordExpense(category, it)
             }
         }
+        if (confirmClearAll) {
+            ConfirmDialog(
+                title = "Limpiar todos los datos",
+                message = "Se borrarán los gastos, deudas e ingresos de todos los meses guardados. Esta acción no se puede deshacer.",
+                confirmLabel = "Limpiar todo",
+                onConfirm = {
+                    confirmClearAll = false
+                    clearAllData()
+                },
+                onDismiss = { confirmClearAll = false }
+            )
+        }
+        if (confirmClearMonth) {
+            ConfirmDialog(
+                title = "Limpiar mes actual",
+                message = "Se borrarán los gastos, deudas e ingresos de ${monthDisplayName(current.monthId)}. El mes seguirá disponible en la lista.",
+                confirmLabel = "Limpiar mes",
+                onConfirm = {
+                    confirmClearMonth = false
+                    clearCurrentMonth()
+                },
+                onDismiss = { confirmClearMonth = false }
+            )
+        }
     }
+}
+
+// Dates after today are never selectable, in any picker.
+@OptIn(ExperimentalMaterial3Api::class)
+private object PastOrPresentDates : SelectableDates {
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean = isSelectableDay(utcTimeMillis)
+    override fun isSelectableYear(year: Int): Boolean = isPastOrPresentYear(year)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateFilterPicker(show: Boolean, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
     if (!show) return
-    val pickerState = rememberDatePickerState()
+    val pickerState = rememberDatePickerState(selectableDates = PastOrPresentDates)
     DatePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(
                 onClick = {
-                    pickerState.selectedDateMillis?.let(onSelect)
+                    pickerState.selectedDateMillis?.let { onSelect(localDateFromPicker(it)) }
                 }
             ) { Text("Listo") }
         },
@@ -353,6 +458,17 @@ private fun ErrorState(message: String) {
         Spacer(Modifier.height(8.dp))
         Text(message)
     }
+}
+
+@Composable
+private fun ConfirmDialog(title: String, message: String, confirmLabel: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = { Button(onClick = onConfirm) { Text(confirmLabel) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+    )
 }
 
 @Composable
@@ -392,6 +508,9 @@ private fun BudgetScreen(
     onDeleteExpense: (String, Expense) -> Unit,
     onFillMockData: () -> Unit,
     onClearAllData: () -> Unit,
+    onClearCurrentMonth: () -> Unit,
+    months: List<MonthSummary>,
+    onMonthSelect: (String) -> Unit,
     onOpenDatePicker: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -401,7 +520,32 @@ private fun BudgetScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
+                title = {
+                    Box {
+                        var monthMenuExpanded by remember { mutableStateOf(false) }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable(enabled = months.size > 1 && !saving) { monthMenuExpanded = true }
+                        ) {
+                            Text(monthDisplayName(budget.monthId), fontWeight = FontWeight.Bold)
+                            if (months.size > 1) {
+                                Spacer(Modifier.size(4.dp))
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Cambiar mes", tint = Color.White)
+                            }
+                        }
+                        DropdownMenu(expanded = monthMenuExpanded, onDismissRequest = { monthMenuExpanded = false }) {
+                            months.asReversed().forEach { month ->
+                                DropdownMenuItem(
+                                    text = { Text(month.label) },
+                                    onClick = {
+                                        onMonthSelect(month.monthId)
+                                        monthMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = Color.White,
@@ -419,6 +563,13 @@ private fun BudgetScreen(
                             text = { Text("Llenar datos de prueba") },
                             onClick = {
                                 onFillMockData()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Limpiar mes actual") },
+                            onClick = {
+                                onClearCurrentMonth()
                                 menuExpanded = false
                             }
                         )
@@ -787,7 +938,7 @@ private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(budget.monthLabel, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(monthDisplayName(budget.monthId), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             MetricCard("Ingresos", "$ ${budget.incomeUsd.display()}", Modifier.fillMaxWidth())
             MetricCard("Gastos", "$ ${budget.cashUsd.display()}", Modifier.fillMaxWidth())
             MetricCard("Conversión", "$ ${convert(budget.conversionBs, budget.incomeRate).display()}", Modifier.fillMaxWidth())
@@ -1002,21 +1153,14 @@ private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: 
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
-        val dateState = rememberDatePickerState(timestamp)
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = pickerDateFromLocal(timestamp), selectableDates = PastOrPresentDates)
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     dateState.selectedDateMillis?.let { selected ->
-                        val current = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(timestampText) ?: Date(selected)
-                        val calendar = JavaCalendar.getInstance().apply {
-                            time = current
-                            set(JavaCalendar.YEAR, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.YEAR))
-                            set(JavaCalendar.MONTH, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.MONTH))
-                            set(JavaCalendar.DAY_OF_MONTH, JavaCalendar.getInstance().apply { timeInMillis = selected }.get(JavaCalendar.DAY_OF_MONTH))
-                        }
-                        timestamp = calendar.timeInMillis
-                        timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(calendar.time)
+                        timestamp = localDateFromPicker(selected, parseExpenseTimestamp(timestampText) ?: timestamp)
+                        timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
                     }
                     showDatePicker = false
                 }) { Text("Guardar fecha") }
@@ -1043,15 +1187,13 @@ private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: 
             )
             Button(onClick = { showDatePicker = true }) { Text("Elegir fecha") }
             Button(onClick = { val now = System.currentTimeMillis(); timestamp = now; timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(now)) }) { Text("Usar fecha actual") }
-            if (invalid) Text("Completa la descripción y usa valores válidos.", color = MaterialTheme.colorScheme.error)
+            if (invalid) Text("Completa la descripción, usa valores válidos y una fecha que no esté en el futuro.", color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { Button(onClick = {
         val parsedAmount = amount.toBigDecimalOrNull()
         val parsedRate = rate.toBigDecimalOrNull()
-        val parsedTimestamp = try {
-            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(timestampText)?.time ?: timestamp
-        } catch (_: Exception) { timestamp }
-        if (label.isNotBlank() && parsedAmount != null && parsedRate != null && parsedAmount.signum() >= 0 && parsedRate.signum() >= 0) onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, parsedRate, parsedTimestamp)) else invalid = true
+        val parsedTimestamp = parseExpenseTimestamp(timestampText)
+        if (label.isNotBlank() && parsedAmount != null && parsedRate != null && parsedAmount.signum() >= 0 && parsedRate.signum() >= 0 && parsedTimestamp != null && isPastOrPresentTimestamp(parsedTimestamp)) onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, parsedRate, parsedTimestamp)) else invalid = true
     }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 

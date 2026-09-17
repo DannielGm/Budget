@@ -2,7 +2,7 @@
 
 Project: `E:\Projects\Presupuesto`
 
-Kotlin + Jetpack Compose, Android 8.0 (API 26) or later. The app is an editable September overview backed by private local Room storage. Month history and automatic debt carry-forward are planned but are not exposed yet.
+Kotlin + Jetpack Compose, Android 8.0 (API 26) or later. The app is an editable monthly budget backed by private local Room storage. Stored months can be switched from the top bar; automatic debt carry-forward is still planned.
 
 ## Implemented
 
@@ -21,7 +21,7 @@ Kotlin + Jetpack Compose, Android 8.0 (API 26) or later. The app is an editable 
 
 The workbook is preserved unchanged. The source and raw inventory still contain all worksheets for analysis; only September is bundled in the app.
 
-Room stores the current month in the app's private database. This is persistence, not encryption; the seed and stored financial data should still be treated as private.
+Room stores each month in the app's private database. This is persistence, not encryption; the seed and stored financial data should still be treated as private.
 
 ## Finished phases
 
@@ -76,13 +76,16 @@ Room stores the current month in the app's private database. This is persistence
 - Kept category, expense, and debt rows scoped to their month.
 - Added a repository regression test covering independent September and October records.
 
-## Planned Phase 4 — Multi-month budget model
+### Phase 4.2 — Month selection and the current-month flow
+- Added a month selector to the top bar; months are labelled with their name and the year is appended only when it is not the current one.
+- Loads the selected month from storage and re-renders its own income, categories, expenses, and debts on every switch.
+- Kept sortable `YYYY-MM` month ids so ordering is chronological instead of alphabetical; the seed month became `2026-09` and the database moved to schema v3.
+- Dropped the manual “new month” action: months only come into existence through recorded data, created empty with the category names and types carried over.
+- Restricted every date entry to today or earlier, in the date picker, the typed date field, and the repository guard that rejects future months.
+- Added confirmations to both clear actions: “Limpiar mes actual” zeroes the selected month and keeps its categories and list entry; “Limpiar todos los datos” removes all months, then retains the selected month zeroed with its category definitions.
+- **Upgrade warning:** schema v2 → v3 uses destructive migration. Existing on-device edits are deleted and the private September seed is restored. This is not a data-preserving migration.
 
-### Phase 4.2 — Month selection and creation flow
-- Add a month selector in the main app UI.
-- Load the selected month from storage and display the correct budget state.
-- Add a “new month” action that creates a fresh month entry without overwriting existing data.
-- Ensure the app can switch between months without losing prior calculations or edits.
+## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.3 — Carry-forward logic
 - Define how balances, debt, and recurring values pass from one month to the next.
@@ -118,6 +121,8 @@ Room stores the current month in the app's private database. This is persistence
 ## Verification status
 
 
-Phase 4.1 is data-layer only; the month selector that exercises it arrives in Phase 4.2, so multi-month behavior cannot be checked by hand yet. The Phase 4.1 repository test (`repositorySupportsMultipleMonths`) passes through the `Verify Budget Test` VS Code task. `versionName` mirrors the phase (`0.4.1`), so a rebuild is required before an installed APK reports that version.
+Phase 4.2 (`versionName=0.4.2`, `versionCode=3`) passed a clean `:app:assembleDebug :app:testDebugUnitTest` build on 2026-09-17: 13 tests, zero failures or errors. Tests cover month ordering and names, implicit month creation, cross-month expense movement, isolated clearing, restart after clear-all, and date validation.
+
+The rebuilt debug APK was installed successfully on `emulator-5554` (API 37); the installed version was verified and a cold launch returned `Status: ok`. The dashboard displayed the month name “Septiembre”, and the current-month confirmation text was inspected. Full interactive coverage of month switching and both destructive actions has not been completed. The crash-buffer entries inspected belonged to the emulator's UWB service, not the app.
 
 The original project scope remains: create a usable monthly budget app from the workbook logic and complete the remaining lifecycle features needed for real personal use.

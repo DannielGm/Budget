@@ -3,8 +3,87 @@ package com.personal.presupuesto
 import java.math.BigDecimal
 import java.math.MathContext
 import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 
 private val moneyContext = MathContext.DECIMAL128
+
+// The workbook seed has no year column, so its month is pinned here.
+const val SEED_MONTH_ID = "2026-09"
+
+private val monthNames = listOf(
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+)
+
+private fun dateKey(calendar: Calendar): Long =
+    calendar.get(Calendar.YEAR).toLong() * 10_000 +
+        (calendar.get(Calendar.MONTH) + 1).toLong() * 100 +
+        calendar.get(Calendar.DAY_OF_MONTH).toLong()
+
+// Material3 reports picker selections as the chosen day at 00:00 UTC.
+private fun utcCalendar(timeInMillis: Long): Calendar =
+    Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { this.timeInMillis = timeInMillis }
+
+fun monthIdOf(timestamp: Long): String {
+    val calendar = Calendar.getInstance().apply { timeInMillis = timestamp }
+    return "%04d-%02d".format(Locale.US, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1)
+}
+
+fun currentMonthId(): String = monthIdOf(System.currentTimeMillis())
+
+fun isFutureMonth(monthId: String): Boolean {
+    require(Regex("[0-9]{4}-(0[1-9]|1[0-2])").matches(monthId)) { "Mes inválido" }
+    return monthId > currentMonthId()
+}
+
+fun parseExpenseTimestamp(text: String): Long? {
+    val position = java.text.ParsePosition(0)
+    val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply { isLenient = false }
+    val parsed = format.parse(text, position) ?: return null
+    return parsed.time.takeIf { position.index == text.length }
+}
+
+fun localDateFromPicker(utcTimeMillis: Long, time: Long = 0L): Long {
+    val day = utcCalendar(utcTimeMillis)
+    return Calendar.getInstance().apply {
+        timeInMillis = time
+        set(Calendar.YEAR, day.get(Calendar.YEAR))
+        set(Calendar.MONTH, day.get(Calendar.MONTH))
+        set(Calendar.DAY_OF_MONTH, day.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+}
+
+fun pickerDateFromLocal(timestamp: Long): Long {
+    val local = Calendar.getInstance().apply { timeInMillis = timestamp }
+    return utcCalendar(0).apply {
+        clear()
+        set(local.get(Calendar.YEAR), local.get(Calendar.MONTH), local.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+}
+
+fun monthName(monthId: String): String {
+    val month = monthId.substringAfterLast('-').toIntOrNull() ?: return monthId
+    return monthNames.getOrNull(month - 1) ?: monthId
+}
+
+// The UI shows month names; the year only appears when it is not the current one.
+fun monthDisplayName(monthId: String): String {
+    val year = monthId.substringBefore('-')
+    return if (year == currentMonthId().substringBefore('-')) monthName(monthId) else "${monthName(monthId)} $year"
+}
+
+fun currentLocalDateKey(): Long =
+    dateKey(Calendar.getInstance().apply { timeInMillis = System.currentTimeMillis() })
+
+fun pickerDateKey(utcTimeMillis: Long): Long = dateKey(utcCalendar(utcTimeMillis))
+
+fun isSelectableDay(utcTimeMillis: Long): Boolean = pickerDateKey(utcTimeMillis) <= currentLocalDateKey()
+
+fun isPastOrPresentYear(year: Int): Boolean = year <= Calendar.getInstance().get(Calendar.YEAR)
+
+fun isPastOrPresentTimestamp(timestamp: Long): Boolean =
+    dateKey(Calendar.getInstance().apply { timeInMillis = timestamp }) <= currentLocalDateKey()
 fun convert(amount: BigDecimal, rate: BigDecimal): BigDecimal =
     if (rate.signum() == 0) BigDecimal.ZERO else amount.divide(rate, moneyContext)
 
@@ -42,7 +121,7 @@ data class Budget(
     val conversionBs: BigDecimal,
     val categories: List<Category>,
     val debts: List<Debt> = emptyList(),
-    val monthId: String = "september"
+    val monthId: String
 ) {
     val creditPurchasesBs: BigDecimal get() = categories.filter { !it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
     val debtBs: BigDecimal get() = debts.fold(creditPurchasesBs) { total, debt -> total + debt.remainingBs }
