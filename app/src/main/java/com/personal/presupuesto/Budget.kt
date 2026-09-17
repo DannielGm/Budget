@@ -30,6 +30,24 @@ fun monthIdOf(timestamp: Long): String {
     return "%04d-%02d".format(Locale.US, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1)
 }
 
+// Read picker months in UTC: interpreting midnight as local time can select the previous month.
+fun monthIdFromPicker(utcTimeMillis: Long): String {
+    val calendar = utcCalendar(utcTimeMillis)
+    return "%04d-%02d".format(Locale.US, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1)
+}
+
+fun pickerStartOfMonth(monthId: String): Long {
+    require(Regex("[0-9]{4}-(0[1-9]|1[0-2])").matches(monthId)) { "Mes inválido" }
+    return utcCalendar(0).apply {
+        clear()
+        set(monthId.substringBefore('-').toInt(), monthId.substringAfter('-').toInt() - 1, 1)
+    }.timeInMillis
+}
+
+fun isSelectableBudgetDay(utcTimeMillis: Long, storedMonthIds: Set<String>): Boolean =
+    isSelectableDay(utcTimeMillis) &&
+        (monthIdFromPicker(utcTimeMillis) == currentMonthId() || monthIdFromPicker(utcTimeMillis) in storedMonthIds)
+
 fun currentMonthId(): String = monthIdOf(System.currentTimeMillis())
 
 fun isFutureMonth(monthId: String): Boolean {

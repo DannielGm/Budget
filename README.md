@@ -91,6 +91,13 @@ Room stores each month in the app's private database. This is persistence, not e
 - Keep the existing stored-month-only list, chronological ordering, and implicit creation rules. No database schema change or data reset.
 - App version: `0.4.2.1` (`versionCode=4`).
 
+### Phase 4.2.2 — Calendar month selector and current-month startup
+- Replaced the month dropdown with a Material 3 calendar like the graph's date picker: tapping the top-bar month opens it, a selected day opens that whole month, and the calendar opens on the displayed month. Its state is separate from the graph filter.
+- Selectable days are the current month (today and earlier) plus every stored month's days; future dates and months with no data stay disabled, so browsing cannot create empty historical months.
+- The app now always opens on the current local month at startup: it is created empty (carrying category names and types only) when missing, and the previously viewed month is never restored. The first install keeps the seed untouched in its own month.
+- Added regression tests for empty-current-month startup, preservation of historical and existing current-month data, no reseed after clear-all, calendar UTC round-trips across year boundaries and time zones, and selectable-day rules (18 tests total).
+- App version: `0.4.2.2` (`versionCode=5`). No database schema change or data reset.
+
 ## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.3 — Carry-forward logic
@@ -125,6 +132,8 @@ Room stores each month in the app's private database. This is persistence, not e
 - Finalize documentation, deployment notes, and the handoff checklist for the finished app.
 
 ## Verification status
+
+Phase 4.2.2 (`versionName=0.4.2.2`, `versionCode=5`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17. The test report records 18 tests, zero failures or errors; the final incremental build also succeeded. Interactive verification remains pending: APK installation could not proceed because `emulator-5554` was unavailable, and the restarted emulator remained offline during the checks. Calendar interaction and cold-start behavior have not been verified on-device for this version. No emulator data was cleared.
 
 Phase 4.2.1 (`versionName=0.4.2.1`, `versionCode=4`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17: 13 tests, zero failures or errors. The debug APK was installed on `emulator-5554` and its version verified. Interactive checks confirmed the arrow is visible with one stored month, the single-month menu opens and closes on selection, a past-dated expense implicitly creates August, the menu lists September before August, switching both ways shows isolated data, and the selector works after a cold restart. The temporary `Phase421Check` expense was deleted; the empty August month remains. These are emulator checks, not automated Compose UI tests. Clearing flows were not retested in this bugfix.
 

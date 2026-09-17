@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -167,11 +168,9 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     LaunchedEffect(Unit) {
         runCatching {
             val seed = withContext(Dispatchers.IO) { SeedLoader.load(context) }
-            withContext(Dispatchers.IO) { repository.loadOrSeed(seed) }
-            // The newest stored month wins; a fresh install only holds the seed.
-            val newest = withContext(Dispatchers.IO) { repository.listMonthIds().lastOrNull() } ?: seed.monthId
-            val loaded = withContext(Dispatchers.IO) { repository.load(newest) } ?: seed
-            loaded to withContext(Dispatchers.IO) { repository.listMonths() }
+            withContext(Dispatchers.IO) {
+                repository.loadCurrentMonth(seed) to repository.listMonths()
+            }
         }.onSuccess { (loaded, stored) ->
             budget = loaded
             months = stored
@@ -263,10 +262,17 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         if (saving || current.monthId == monthId) return
         saving = true
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { repository.load(monthId) } }
-                .onSuccess { selected ->
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val selected = if (monthId == currentMonthId()) repository.loadOrCreate(monthId, current)
+                        else repository.load(monthId)
+                    selected to repository.listMonths()
+                }
+            }
+                .onSuccess { (selected, stored) ->
                     if (selected != null) {
                         budget = selected
+                        months = stored
                         selectedCategoryName = null
                         dateFilter = null
                         graphRangeDays = 1
@@ -442,6 +448,50 @@ private fun DateFilterPicker(show: Boolean, onDismiss: () -> Unit, onSelect: (Lo
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BudgetMonthPicker(monthId: String, storedMonthIds: Set<String>, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    val selectableDates = remember(storedMonthIds) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                isSelectableBudgetDay(utcTimeMillis, storedMonthIds)
+            override fun isSelectableYear(year: Int): Boolean =
+                isPastOrPresentYear(year) &&
+                    (year == currentMonthId().substringBefore('-').toInt() ||
+                        storedMonthIds.any { it.substringBefore('-').toInt() == year })
+        }
+    }
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = pickerStartOfMonth(monthId),
+        initialDisplayedMonthMillis = pickerStartOfMonth(monthId),
+        selectableDates = selectableDates
+    )
+    val selected = pickerState.selectedDateMillis
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = selected != null && isSelectableBudgetDay(selected, storedMonthIds),
+                onClick = {
+                    selected?.takeIf { isSelectableBudgetDay(it, storedMonthIds) }
+                        ?.let { onSelect(monthIdFromPicker(it)) }
+                }
+            ) { Text("Abrir mes") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+    ) {
+        DatePicker(
+            state = pickerState,
+            title = { Text("Selecciona una fecha para abrir su mes", modifier = Modifier.padding(24.dp)) },
+            headline = {
+                Text(selected?.let { monthDisplayName(monthIdFromPicker(it)) } ?: "Seleccionar mes",
+                    modifier = Modifier.padding(horizontal = 24.dp))
+            },
+            showModeToggle = false
+        )
+    }
+}
+
 @Composable
 private fun LoadingState() {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -522,25 +572,25 @@ private fun BudgetScreen(
             TopAppBar(
                 title = {
                     Box {
-                        var monthMenuExpanded by remember { mutableStateOf(false) }
+                        var showMonthPicker by remember { mutableStateOf(false) }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable(enabled = !saving) { monthMenuExpanded = true }
+                            modifier = Modifier.clickable(enabled = !saving) { showMonthPicker = true }
                         ) {
                             Text(monthDisplayName(budget.monthId), fontWeight = FontWeight.Bold)
                             Spacer(Modifier.size(4.dp))
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Cambiar mes", tint = Color.White)
+                            Icon(Icons.Default.DateRange, contentDescription = "Cambiar mes", tint = Color.White)
                         }
-                        DropdownMenu(expanded = monthMenuExpanded, onDismissRequest = { monthMenuExpanded = false }) {
-                            months.asReversed().forEach { month ->
-                                DropdownMenuItem(
-                                    text = { Text(month.label) },
-                                    onClick = {
-                                        onMonthSelect(month.monthId)
-                                        monthMenuExpanded = false
-                                    }
-                                )
-                            }
+                        if (showMonthPicker) {
+                            BudgetMonthPicker(
+                                monthId = budget.monthId,
+                                storedMonthIds = months.map { it.monthId }.toSet(),
+                                onDismiss = { showMonthPicker = false },
+                                onSelect = {
+                                    showMonthPicker = false
+                                    onMonthSelect(it)
+                                }
+                            )
                         }
                     }
                 },

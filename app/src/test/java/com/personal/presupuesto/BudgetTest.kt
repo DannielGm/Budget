@@ -216,6 +216,84 @@ class BudgetTest {
         } finally { db.close() }
     }
 
+    @Test fun startupCreatesCurrentMonthWithoutCopyingHistoricalValues() = runBlocking {
+        val (db, repo) = memoryRepository()
+        try {
+            val past = monthIdMonthsAhead(-1)
+            val history = budgetFor(past).copy(
+                categories = listOf(Category("HOGAR", true, listOf(
+                    Expense("old", "Histórico", n("20"), n("2"), localDateFromPicker(pickerStartOfMonth(past)))
+                ))),
+                debts = listOf(Debt("Visa", n("100"), n("10")))
+            )
+            repo.save(history)
+            val before = repo.load(past)
+            val opened = repo.loadCurrentMonth(budgetFor(currentMonthId()))
+            assertEquals(currentMonthId(), opened.monthId)
+            assertEquals(BigDecimal.ZERO, opened.incomeBs)
+            assertEquals(BigDecimal.ZERO, opened.incomeRate)
+            assertEquals(BigDecimal.ZERO, opened.conversionBs)
+            assertEquals(listOf(Category("HOGAR", true, emptyList())), opened.categories)
+            assertTrue(opened.debts.isEmpty())
+            assertEquals(before, repo.load(past))
+            repo.load(past) // Browsing history must not change the startup month.
+            assertEquals(opened, BudgetRepository(db).loadCurrentMonth(history))
+            assertEquals(listOf(past, currentMonthId()), repo.listMonthIds())
+        } finally { db.close() }
+    }
+
+    @Test fun startupPreservesExistingCurrentMonthAndDoesNotReseedAfterClear() = runBlocking {
+        val (db, repo) = memoryRepository()
+        try {
+            val past = budgetFor(monthIdMonthsAhead(-1))
+            val current = budgetFor(currentMonthId()).copy(incomeBs = n("321"))
+            repo.save(past)
+            repo.save(current)
+            val before = repo.load(current.monthId)
+            assertEquals(before, repo.loadCurrentMonth(past))
+            repo.clearAllKeepingMonth(past.monthId)
+            val opened = repo.loadCurrentMonth(past)
+            assertEquals(current.monthId, opened.monthId)
+            assertEquals(BigDecimal.ZERO, opened.incomeBs)
+            assertEquals(BigDecimal.ZERO, repo.load(past.monthId)!!.incomeBs)
+        } finally { db.close() }
+    }
+
+    @Test fun firstStartupKeepsSeedAndOpensCurrentMonth() = runBlocking {
+        val (db, repo) = memoryRepository()
+        try {
+            val seed = budgetFor(monthIdMonthsAhead(-1))
+            assertEquals(currentMonthId(), repo.loadCurrentMonth(seed).monthId)
+            assertEquals(seed.incomeBs, repo.load(seed.monthId)!!.incomeBs)
+        } finally { db.close() }
+    }
+
+    @Test fun calendarMonthSelectionUsesUtcAcrossYearsAndTimeZones() {
+        val original = TimeZone.getDefault()
+        try {
+            for (zone in listOf("America/Los_Angeles", "Pacific/Kiritimati", "UTC")) {
+                TimeZone.setDefault(TimeZone.getTimeZone(zone))
+                for (month in listOf("2024-12", "2025-01", "2024-02")) {
+                    val first = pickerStartOfMonth(month)
+                    assertEquals(month, monthIdFromPicker(first))
+                    assertEquals(month, monthIdOf(localDateFromPicker(first)))
+                }
+                assertEquals("2024-12", monthIdFromPicker(pickerStartOfMonth("2025-01") - 1))
+            }
+        } finally { TimeZone.setDefault(original) }
+    }
+
+    @Test fun budgetCalendarAllowsOnlyStoredMonthsAndCurrentPastOrPresentDays() {
+        val past = monthIdMonthsAhead(-1)
+        assertTrue(isSelectableBudgetDay(pickerStartOfMonth(past), setOf(past)))
+        assertFalse(isSelectableBudgetDay(pickerStartOfMonth(past), emptySet()))
+        assertTrue(isSelectableBudgetDay(pickerStartOfMonth(currentMonthId()), emptySet()))
+        assertTrue(isSelectableBudgetDay(utcMidnightOfLocalDate(0), emptySet()))
+        assertFalse(isSelectableBudgetDay(utcMidnightOfLocalDate(1), setOf(currentMonthId())))
+        val future = monthIdMonthsAhead(1)
+        assertFalse(isSelectableBudgetDay(pickerStartOfMonth(future), setOf(future)))
+    }
+
     @Test fun typedDatesAreStrictAndPickerPreservesLocalDay() {
         assertEquals(null, parseExpenseTimestamp("2026-02-30 12:00"))
         assertEquals(null, parseExpenseTimestamp("not a date"))

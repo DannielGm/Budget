@@ -146,7 +146,13 @@ class BudgetRepository(private val database: BudgetDatabase) {
         return load(seed.monthId) ?: error("No se pudo leer el presupuesto guardado")
     }
 
-    // Months exist only because data was recorded for them, so a missing one starts empty.
+    // Startup always opens the local current month, regardless of the last viewed month.
+    suspend fun loadCurrentMonth(seed: Budget): Budget = database.withTransaction {
+        val template = loadOrSeed(seed)
+        loadOrCreate(com.personal.presupuesto.currentMonthId(), template)
+    }
+
+    // Historical months are created by recorded data; startup also creates the current month.
     // Categories are carried over by name and type; amounts, debts, and income stay at zero.
     suspend fun loadOrCreate(monthId: String, template: Budget): Budget {
         require(!isFutureMonth(monthId)) { "No se pueden crear meses futuros" }
