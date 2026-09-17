@@ -1,9 +1,18 @@
 package com.personal.presupuesto
 
+import android.content.Context
+import androidx.room.Room
+import com.personal.presupuesto.data.BudgetDatabase
+import com.personal.presupuesto.data.BudgetRepository
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.RobolectricTestRunner
 import java.math.BigDecimal
 
+@RunWith(RobolectricTestRunner::class)
 class BudgetTest {
     private fun n(value: String) = BigDecimal(value)
     @Test fun zeroRowRateReturnsZero() {
@@ -67,5 +76,30 @@ class BudgetTest {
         val filtered = budget.filteredCategories(day + 12L * 60 * 60 * 1000)
         assertEquals(1, filtered.size)
         assertEquals(2, filtered.first().rows.size)
+    }
+
+    @Test fun repositorySupportsMultipleMonths() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val db = Room.inMemoryDatabaseBuilder(context, BudgetDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val repo = BudgetRepository(db)
+        val september = Budget(
+            monthId = "september",
+            monthLabel = "Septiembre",
+            incomeBs = n("1000"),
+            incomeRate = n("10"),
+            conversionBs = n("0"),
+            categories = emptyList()
+        )
+        val october = september.copy(monthId = "october", monthLabel = "Octubre")
+
+        repo.save(september)
+        repo.save(october)
+
+        assertEquals(listOf("october", "september"), repo.listMonthIds())
+        assertEquals("Octubre", repo.load("october")?.monthLabel)
+        assertEquals("Septiembre", repo.load("september")?.monthLabel)
+        db.close()
     }
 }

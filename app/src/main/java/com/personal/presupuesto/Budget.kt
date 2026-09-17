@@ -41,7 +41,8 @@ data class Budget(
     val incomeRate: BigDecimal,
     val conversionBs: BigDecimal,
     val categories: List<Category>,
-    val debts: List<Debt> = emptyList()
+    val debts: List<Debt> = emptyList(),
+    val monthId: String = "september"
 ) {
     val creditPurchasesBs: BigDecimal get() = categories.filter { !it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
     val debtBs: BigDecimal get() = debts.fold(creditPurchasesBs) { total, debt -> total + debt.remainingBs }

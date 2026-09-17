@@ -59,8 +59,11 @@ interface BudgetDao {
     @Query("SELECT COUNT(*) FROM budgets")
     suspend fun countBudgets(): Int
 
-    @Query("SELECT * FROM budgets ORDER BY monthId LIMIT 1")
-    suspend fun firstBudget(): BudgetEntity?
+    @Query("SELECT * FROM budgets ORDER BY monthId ASC")
+    suspend fun budgets(): List<BudgetEntity>
+
+    @Query("SELECT * FROM budgets WHERE monthId = :monthId LIMIT 1")
+    suspend fun budget(monthId: String): BudgetEntity?
 
     @Query("SELECT * FROM categories WHERE monthId = :monthId ORDER BY position")
     suspend fun categories(monthId: String): List<CategoryEntity>
@@ -122,15 +125,16 @@ abstract class BudgetDatabase : RoomDatabase() {
 
 class BudgetRepository(private val database: BudgetDatabase) {
     private val dao = database.budgetDao()
-    private val monthId = "september"
+
+    suspend fun listMonthIds(): List<String> = dao.budgets().map { it.monthId }
 
     suspend fun loadOrSeed(seed: Budget): Budget {
         if (dao.countBudgets() == 0) save(seed)
-        return load() ?: error("No se pudo leer el presupuesto guardado")
+        return load(seed.monthId) ?: error("No se pudo leer el presupuesto guardado")
     }
 
-    suspend fun load(): Budget? {
-        val record = dao.firstBudget() ?: return null
+    suspend fun load(monthId: String = "september"): Budget? {
+        val record = dao.budget(monthId) ?: return null
         val categories = dao.categories(record.monthId)
         val expenses = dao.expenses(record.monthId).groupBy { it.categoryName }
         return Budget(
@@ -143,11 +147,13 @@ class BudgetRepository(private val database: BudgetDatabase) {
                     Expense(it.id, it.label, it.amountBs.toBigDecimal(), it.rate.toBigDecimal(), it.timestamp)
                 })
             },
-            dao.debts(record.monthId).map { Debt(it.label, it.openingBs.toBigDecimal(), it.paymentBs.toBigDecimal()) }
+            dao.debts(record.monthId).map { Debt(it.label, it.openingBs.toBigDecimal(), it.paymentBs.toBigDecimal()) },
+            record.monthId
         )
     }
 
     suspend fun save(budget: Budget) {
+        val monthId = budget.monthId
         database.withTransaction {
             dao.deleteCategories(monthId)
             dao.deleteExpenses(monthId)
