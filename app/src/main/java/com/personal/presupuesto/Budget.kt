@@ -7,7 +7,13 @@ private val moneyContext = MathContext.DECIMAL128
 fun convert(amount: BigDecimal, rate: BigDecimal): BigDecimal =
     if (rate.signum() == 0) BigDecimal.ZERO else amount.divide(rate, moneyContext)
 
-data class Expense(val id: String, val label: String, val amountBs: BigDecimal, val rate: BigDecimal) {
+data class Expense(
+    val id: String,
+    val label: String,
+    val amountBs: BigDecimal,
+    val rate: BigDecimal,
+    val timestamp: Long = System.currentTimeMillis()
+) {
     val amountUsd: BigDecimal get() = convert(amountBs, rate)
 }
 data class Category(val name: String, val cashExpense: Boolean, val rows: List<Expense>) {

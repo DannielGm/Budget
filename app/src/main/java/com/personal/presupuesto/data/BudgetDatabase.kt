@@ -41,6 +41,7 @@ data class ExpenseEntity(
     val label: String,
     val amountBs: String,
     val rate: String,
+    val timestamp: Long,
     val position: Int
 )
 
@@ -94,7 +95,7 @@ interface BudgetDao {
 
 @Database(
     entities = [BudgetEntity::class, CategoryEntity::class, ExpenseEntity::class, DebtEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class BudgetDatabase : RoomDatabase() {
@@ -105,7 +106,7 @@ abstract class BudgetDatabase : RoomDatabase() {
             context,
             BudgetDatabase::class.java,
             "presupuesto.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 }
 
@@ -129,7 +130,7 @@ class BudgetRepository(private val database: BudgetDatabase) {
             record.conversionBs.toBigDecimal(),
             categories.map { category ->
                 Category(category.name, category.cashExpense, expenses[category.name].orEmpty().map {
-                    Expense(it.id, it.label, it.amountBs.toBigDecimal(), it.rate.toBigDecimal())
+                    Expense(it.id, it.label, it.amountBs.toBigDecimal(), it.rate.toBigDecimal(), it.timestamp)
                 })
             },
             dao.debts(record.monthId).map { Debt(it.label, it.openingBs.toBigDecimal(), it.paymentBs.toBigDecimal()) }
@@ -144,7 +145,7 @@ class BudgetRepository(private val database: BudgetDatabase) {
             dao.insertBudget(BudgetEntity(monthId, budget.monthLabel, budget.incomeBs.toPlainString(), budget.incomeRate.toPlainString(), budget.conversionBs.toPlainString()))
             dao.insertCategories(budget.categories.mapIndexed { index, category -> CategoryEntity(monthId, category.name, category.cashExpense, index) })
             dao.insertExpenses(budget.categories.flatMap { category -> category.rows.mapIndexed { index, expense ->
-                ExpenseEntity(monthId, expense.id, category.name, expense.label, expense.amountBs.toPlainString(), expense.rate.toPlainString(), index)
+                ExpenseEntity(monthId, expense.id, category.name, expense.label, expense.amountBs.toPlainString(), expense.rate.toPlainString(), expense.timestamp, index)
             } })
             dao.insertDebts(budget.debts.mapIndexed { index, debt -> DebtEntity(monthId, debt.label, debt.openingBs.toPlainString(), debt.paymentBs.toPlainString(), index) })
         }

@@ -1,9 +1,12 @@
 package com.personal.presupuesto
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +26,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,6 +58,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.personal.presupuesto.data.BudgetDatabase
@@ -65,6 +72,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Random
 
 private fun BigDecimal.display(): String = setScale(2, RoundingMode.HALF_UP).toPlainString()
 
@@ -73,12 +81,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val repository = BudgetRepository(BudgetDatabase.create(applicationContext))
-        setContent { PresupuestoTheme { BudgetApp(repository, applicationContext) } }
+        setContent {
+            val systemDark = isSystemInDarkTheme()
+            var darkTheme by remember { mutableStateOf(systemDark) }
+            PresupuestoTheme(darkTheme = darkTheme) {
+                BudgetApp(repository, applicationContext, darkTheme) { darkTheme = !darkTheme }
+            }
+        }
     }
 }
 
 @Composable
-private fun BudgetApp(repository: BudgetRepository, context: android.content.Context) {
+private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkTheme: Boolean, onThemeToggle: () -> Unit) {
     var budget by remember { mutableStateOf<Budget?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var editingBudget by remember { mutableStateOf(false) }
@@ -112,6 +126,26 @@ private fun BudgetApp(repository: BudgetRepository, context: android.content.Con
             .onFailure { error = "No se pudo cargar el presupuesto." }
     }
 
+    fun fillMockData() {
+        budget?.let { current ->
+            val random = Random()
+            val startTime = System.currentTimeMillis() - 25L * 24 * 60 * 60 * 1000 // 25 days ago
+            val mockCategories = current.categories.map { category ->
+                val mockExpenses = (1..3).map { i ->
+                    Expense(
+                        UUID.randomUUID().toString(),
+                        "Gasto Mock $i",
+                        BigDecimal(random.nextInt(1000) + 100),
+                        current.incomeRate,
+                        startTime + random.nextLong() % (20L * 24 * 60 * 60 * 1000)
+                    )
+                }
+                category.copy(rows = category.rows + mockExpenses)
+            }
+            persist(current.copy(categories = mockCategories))
+        }
+    }
+
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
             error != null && budget == null -> ErrorState(error!!)
@@ -120,11 +154,14 @@ private fun BudgetApp(repository: BudgetRepository, context: android.content.Con
                 budget = budget!!,
                 saving = saving,
                 selectedCategoryName = selectedCategoryName,
+                isDarkTheme = isDarkTheme,
+                onThemeToggle = onThemeToggle,
                 onCategorySelect = { selectedCategoryName = it },
                 onEditBudget = { editingBudget = true },
                 onAddExpense = { addingToCategory = it },
                 onEditExpense = { category, expense -> editingExpense = category to expense },
-                onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) }
+                onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
+                onFillMockData = { fillMockData() }
             )
         }
     }
@@ -175,11 +212,14 @@ private fun BudgetScreen(
     budget: Budget,
     saving: Boolean,
     selectedCategoryName: String?,
+    isDarkTheme: Boolean,
+    onThemeToggle: () -> Unit,
     onCategorySelect: (String) -> Unit,
     onEditBudget: () -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
-    onDeleteExpense: (String, Expense) -> Unit
+    onDeleteExpense: (String, Expense) -> Unit,
+    onFillMockData: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -189,10 +229,10 @@ private fun BudgetScreen(
                 title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
                 actions = {
                     if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp)
-                    IconButton(onClick = onEditBudget) { Icon(Icons.Default.Edit, "Editar presupuesto") }
-                    selectedCategoryName?.let { name ->
-                        IconButton(onClick = { onAddExpense(name) }) { Icon(Icons.Default.Add, "Agregar gasto") }
+                    IconButton(onClick = onThemeToggle) {
+                        Icon(if (isDarkTheme) Icons.Default.Star else Icons.Default.Settings, "Toggle Theme")
                     }
+                    IconButton(onClick = onEditBudget) { Icon(Icons.Default.Edit, "Editar presupuesto") }
                     IconButton(onClick = { menuExpanded = true }) { Icon(Icons.AutoMirrored.Filled.List, "Categorías") }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         budget.categories.forEach { category ->
@@ -204,6 +244,14 @@ private fun BudgetScreen(
                                 }
                             )
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Llenar datos de prueba") },
+                            onClick = {
+                                onFillMockData()
+                                menuExpanded = false
+                            }
+                        )
                     }
                 }
             )
@@ -219,24 +267,20 @@ private fun BudgetScreen(
             Spacer(Modifier.height(12.dp))
             MetricsRow(budget)
             Spacer(Modifier.height(12.dp))
+            BudgetGraph(budget, Modifier.height(120.dp).fillMaxWidth())
+            Spacer(Modifier.height(12.dp))
             DebtCard(budget)
             Spacer(Modifier.height(16.dp))
 
             val selectedCategory = budget.categories.find { it.name == selectedCategoryName }
             if (selectedCategory != null) {
-                Text(
-                    text = selectedCategory.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
                     item {
-                        CategoryCardContent(selectedCategory, onEditExpense, onDeleteExpense)
+                        CategoryCardContent(selectedCategory, onAddExpense, onEditExpense, onDeleteExpense)
                     }
                 }
             } else {
@@ -249,18 +293,64 @@ private fun BudgetScreen(
 }
 
 @Composable
+private fun BudgetGraph(budget: Budget, modifier: Modifier) {
+    val expenses = budget.categories.flatMap { it.rows }.sortedBy { it.timestamp }
+    val income = budget.incomeBs
+    val conversion = budget.conversionBs
+
+    val dataPoints = remember(expenses, income, conversion) {
+        var currentBalance = income - conversion
+        val points = mutableListOf<BigDecimal>()
+        points.add(currentBalance)
+        expenses.forEach {
+            if (budget.categories.find { c -> c.rows.contains(it) }?.cashExpense == true) {
+                currentBalance -= it.amountBs
+            }
+            points.add(currentBalance)
+        }
+        points
+    }
+
+    if (dataPoints.isEmpty()) return
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier.padding(8.dp)) {
+        val width = size.width
+        val height = size.height
+        val maxVal = dataPoints.maxOf { it }.toFloat().coerceAtLeast(1f)
+        val minVal = dataPoints.minOf { it }.toFloat()
+        val range = (maxVal - minVal).coerceAtLeast(1f)
+
+        val path = Path()
+        dataPoints.forEachIndexed { i, valRow ->
+            val x = i * (width / (dataPoints.size - 1).coerceAtLeast(1))
+            val y = height - ((valRow.toFloat() - minVal) / range * height)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, primaryColor, style = Stroke(width = 3.dp.toPx()))
+    }
+}
+
+@Composable
 private fun CategoryCardContent(
     category: Category,
+    onAdd: (String) -> Unit,
     onEdit: (String, Expense) -> Unit,
     onDelete: (String, Expense) -> Unit
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                if (category.cashExpense) "Gasto de caja" else "Compra a crédito",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(category.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (category.cashExpense) "Gasto de caja" else "Compra a crédito",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = { onAdd(category.name) }) { Icon(Icons.Default.Add, "Agregar") }
+            }
             category.rows.forEach { expense ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
