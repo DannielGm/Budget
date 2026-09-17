@@ -396,6 +396,7 @@ private fun BudgetScreen(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var showCategoryPicker by remember { mutableStateOf(false) }
+    var categoryTransitionDirection by remember { mutableStateOf(1) }
 
     Scaffold(
         topBar = {
@@ -522,21 +523,25 @@ private fun BudgetScreen(
                         AnimatedContent(
                             targetState = selectedCategory.name,
                             transitionSpec = {
-                                (slideInHorizontally { it / 2 } + fadeIn()).togetherWith(
-                                    slideOutHorizontally { -it / 2 } + fadeOut()
+                                val direction = if (categoryTransitionDirection > 0) 1 else -1
+                                (slideInHorizontally { it / 2 * direction } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { -it / 2 * direction } + fadeOut()
                                 )
                             },
                             label = "category card transition"
                         ) { categoryName ->
-                            val animatedCategory = budget.categories.firstOrNull { it.name == categoryName } ?: selectedCategory
+                            val animatedCategory = filteredCategories.firstOrNull { it.name == categoryName } ?: selectedCategory
                             CategoryCardContent(
                                 category = animatedCategory,
                                 defaultRate = budget.incomeRate,
                                 onCategoryClick = { showCategoryPicker = true },
                                 onSwipeCategory = { direction ->
-                                    val currentIndex = budget.categories.indexOfFirst { it.name == animatedCategory.name }
-                                    val nextIndex = (currentIndex + direction).mod(budget.categories.size)
-                                    onCategorySelect(budget.categories[nextIndex].name)
+                                    if (filteredCategories.isNotEmpty()) {
+                                        val currentIndex = filteredCategories.indexOfFirst { it.name == animatedCategory.name }
+                                        val nextIndex = (currentIndex + direction).mod(filteredCategories.size)
+                                        categoryTransitionDirection = direction
+                                        onCategorySelect(filteredCategories[nextIndex].name)
+                                    }
                                 },
                                 onAdd = onAddExpense,
                                 onEdit = onEditExpense,
@@ -573,8 +578,13 @@ private fun BudgetScreen(
             categories = budget.categories,
             selectedCategoryName = selectedCategoryName,
             onDismiss = { showCategoryPicker = false },
-            onSelect = {
-                onCategorySelect(it)
+            onSelect = { categoryName ->
+                val currentIndex = budget.categories.indexOfFirst { it.name == selectedCategoryName }
+                val nextIndex = budget.categories.indexOfFirst { it.name == categoryName }
+                if (currentIndex >= 0 && nextIndex >= 0 && currentIndex != nextIndex) {
+                    categoryTransitionDirection = if (nextIndex > currentIndex) 1 else -1
+                }
+                onCategorySelect(categoryName)
                 showCategoryPicker = false
             },
             onAdd = { category ->
@@ -839,8 +849,19 @@ private fun CategoryPickerDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = cashExpense, onCheckedChange = { cashExpense = it })
-                        Text("Gasto de caja")
+                        Text("Tipo", style = MaterialTheme.typography.labelLarge)
+                        Spacer(Modifier.size(8.dp))
+                        FilterChip(
+                            selected = cashExpense,
+                            onClick = { cashExpense = true },
+                            label = { Text("Contado") }
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        FilterChip(
+                            selected = !cashExpense,
+                            onClick = { cashExpense = false },
+                            label = { Text("Crédito") }
+                        )
                     }
                     if (invalid) Text("Usa un nombre nuevo.", color = MaterialTheme.colorScheme.error)
                     Button(onClick = {
