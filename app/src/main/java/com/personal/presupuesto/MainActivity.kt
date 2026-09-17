@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -390,27 +391,36 @@ private fun BudgetScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        if (dateFilter != null) {
-                            Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter)), style = MaterialTheme.typography.labelMedium)
-                            TextButton(onClick = { onDateFilterChange(null) }) { Text("Todo") }
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(1 to "1d", 7 to "7d", 30 to "30d").forEach { (days, label) ->
                             FilterChip(
+                                modifier = Modifier.height(32.dp),
                                 selected = graphRangeDays == days,
                                 onClick = { onRangeChange(days) },
                                 label = { Text(label) }
                             )
                         }
+                        Spacer(Modifier.weight(1f))
+                    }
+                    if (dateFilter != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Mostrando desde ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter))}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { onDateFilterChange(null) }) { Text("Todo") }
+                        }
                     }
                     BudgetGraph(
                         budget = budget,
                         modifier = Modifier
-                            .height(128.dp)
+                            .height(168.dp)
                             .fillMaxWidth()
                             .pointerInput(Unit) {
                                 detectTapGestures(onTap = { onOpenDatePicker() })
@@ -432,6 +442,27 @@ private fun BudgetScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
+                    if (selectedCategory.rows.size > 2) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Desliza para ver más gastos",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Más gastos abajo",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                     item {
                         CategoryCardContent(selectedCategory, onAddExpense, onEditExpense, onDeleteExpense)
                     }
@@ -515,7 +546,7 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
         drawContext.canvas.nativeCanvas.drawText(middleValue.display(), 0f, height / 2f, axisPaint)
         drawContext.canvas.nativeCanvas.drawText("${BigDecimal.valueOf(minVal.toDouble()).display()}", 0f, height, axisPaint)
 
-        val dateFormat = SimpleDateFormat("dd/MM", Locale.getDefault())
+        val dateFormat = SimpleDateFormat(if (rangeDays == 1) "HH:mm" else "dd/MM", Locale.getDefault())
         val labels = expenses.map { dateFormat.format(Date(it.timestamp)) }
         if (labels.isNotEmpty()) {
             val lastIndex = labels.lastIndex
@@ -584,11 +615,11 @@ private fun BalanceCard(budget: Budget, onEdit: () -> Unit, onOpenSummary: () ->
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Saldo disponible", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .82f), style = MaterialTheme.typography.labelLarge)
             Text("Bs ${budget.balanceBs.display()}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
             Text("$ ${budget.balanceUsd?.display() ?: "No disponible"}", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .9f), style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             OutlinedButton(
                 onClick = onEdit,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f))
