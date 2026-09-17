@@ -11,8 +11,8 @@ android {
         applicationId = "com.personal.presupuesto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.4.2.5"
+        versionCode = 7
+        versionName = "0.4.2.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -26,11 +26,14 @@ kotlin {
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.runtime:runtime")
+    implementation("androidx.compose.ui:ui")
     implementation("com.composables:composeunstyled-button:2.9.2")
     implementation("com.composables:composeunstyled-dialog:2.9.2")
     implementation("com.composables:composeunstyled-theming:2.9.2")
     implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.room:room-runtime:2.7.2")

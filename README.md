@@ -109,6 +109,12 @@ Room stores each month in the app's private database. This is persistence, not e
 - Opening the calendar gives initial focus to its heading, not the year editor, so the keyboard stays hidden until the user taps the year field.
 - App version: `0.4.2.5` (`versionCode=6`). The migration build passed 19 unit tests and ten emulator acceptance assertions for day selection, future-date rejection, confirmation, and historical-month navigation. Two additional emulator checks verified the year field stays unfocused with the keyboard hidden on open, then gains focus and shows the keyboard when tapped.
 
+### Phase 4.2.6 — Complete Material3 removal
+- Replaced every remaining Material3 widget with app-owned styling built on Compose Foundation and Compose Unstyled 2.9.2: the top bar, overflow menu, cards, filter chips, checkbox, text fields, progress spinner, all dialogs, and the expense date picker (now the shared month calendar in day-pick mode with the picker's time kept).
+- Theme tokens moved to an app-owned `BudgetColors`/`BudgetTypography` with the same light and dark palettes as before. `MaterialTheme`, `Scaffold`, `TopAppBar`, and the `material3` dependency are gone from the code and build; foundation, runtime, ui, and animation are now declared explicitly (BOM-managed).
+- Behavior preserved: dialogs still dismiss via scrim tap and back press, the calendar still focuses its heading on open so the keyboard stays hidden until the year field is tapped, and all flows and wording are unchanged. No database schema change or data reset.
+- App version: `0.4.2.6` (`versionCode=7`). All 19 unit tests pass, and the APK was installed and launched on the emulator: the main screen rendered through the new components (top bar with month and actions, balance card, flow chips, debt card, category card) with no runtime errors.
+
 ## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.3 — Carry-forward logic
