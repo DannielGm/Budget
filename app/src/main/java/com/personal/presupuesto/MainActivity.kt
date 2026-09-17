@@ -525,13 +525,11 @@ private fun BudgetScreen(
                         var monthMenuExpanded by remember { mutableStateOf(false) }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable(enabled = months.size > 1 && !saving) { monthMenuExpanded = true }
+                            modifier = Modifier.clickable(enabled = !saving) { monthMenuExpanded = true }
                         ) {
                             Text(monthDisplayName(budget.monthId), fontWeight = FontWeight.Bold)
-                            if (months.size > 1) {
-                                Spacer(Modifier.size(4.dp))
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Cambiar mes", tint = Color.White)
-                            }
+                            Spacer(Modifier.size(4.dp))
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Cambiar mes", tint = Color.White)
                         }
                         DropdownMenu(expanded = monthMenuExpanded, onDismissRequest = { monthMenuExpanded = false }) {
                             months.asReversed().forEach { month ->

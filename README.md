@@ -85,6 +85,12 @@ Room stores each month in the app's private database. This is persistence, not e
 - Added confirmations to both clear actions: “Limpiar mes actual” zeroes the selected month and keeps its categories and list entry; “Limpiar todos los datos” removes all months, then retains the selected month zeroed with its category definitions.
 - **Upgrade warning:** schema v2 → v3 uses destructive migration. Existing on-device edits are deleted and the private September seed is restored. This is not a data-preserving migration.
 
+### Phase 4.2.1 — Month selector visibility bugfix
+- Always show the month dropdown arrow, including when only one month is stored.
+- Allow opening the selector with one month; selecting it closes the menu without changing data. Interaction remains disabled while saving.
+- Keep the existing stored-month-only list, chronological ordering, and implicit creation rules. No database schema change or data reset.
+- App version: `0.4.2.1` (`versionCode=4`).
+
 ## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.3 — Carry-forward logic
@@ -119,6 +125,8 @@ Room stores each month in the app's private database. This is persistence, not e
 - Finalize documentation, deployment notes, and the handoff checklist for the finished app.
 
 ## Verification status
+
+Phase 4.2.1 (`versionName=0.4.2.1`, `versionCode=4`) passed `:app:assembleDebug :app:testDebugUnitTest` on 2026-09-17: 13 tests, zero failures or errors. The debug APK was installed on `emulator-5554` and its version verified. Interactive checks confirmed the arrow is visible with one stored month, the single-month menu opens and closes on selection, a past-dated expense implicitly creates August, the menu lists September before August, switching both ways shows isolated data, and the selector works after a cold restart. The temporary `Phase421Check` expense was deleted; the empty August month remains. These are emulator checks, not automated Compose UI tests. Clearing flows were not retested in this bugfix.
 
 
 Phase 4.2 (`versionName=0.4.2`, `versionCode=3`) passed a clean `:app:assembleDebug :app:testDebugUnitTest` build on 2026-09-17: 13 tests, zero failures or errors. Tests cover month ordering and names, implicit month creation, cross-month expense movement, isolated clearing, restart after clear-all, and date validation.

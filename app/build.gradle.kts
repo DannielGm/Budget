@@ -11,8 +11,8 @@ android {
         applicationId = "com.personal.presupuesto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.4.2"
+        versionCode = 4
+        versionName = "0.4.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
