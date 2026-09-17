@@ -161,13 +161,12 @@ class BudgetRepository(private val database: BudgetDatabase) {
         }
     }
 
-    suspend fun clearAllAndSeed(seed: Budget) {
+    suspend fun clearAll() {
         database.withTransaction {
-            dao.deleteAllBudgets()
-            dao.deleteAllCategories()
             dao.deleteAllExpenses()
             dao.deleteAllDebts()
-            save(seed)
+            dao.deleteAllCategories()
+            dao.deleteAllBudgets()
         }
     }
 

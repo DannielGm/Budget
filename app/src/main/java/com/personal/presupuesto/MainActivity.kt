@@ -98,8 +98,6 @@ private fun BigDecimal.display(): String = DecimalFormat(
     DecimalFormatSymbols(Locale("es", "ES"))
 ).format(setScale(2, RoundingMode.HALF_UP))
 
-private val FinanceAccent = Color(0xFF2905A1)
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,6 +128,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var graphRangeDays by remember { mutableStateOf(1) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
+    var dataCleared by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -140,6 +139,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
 
     fun persist(updated: Budget) {
         budget = updated
+        dataCleared = false
         saving = true
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { repository.save(updated) } }
@@ -159,20 +159,34 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     fun fillMockData() {
         budget?.let { current ->
             val random = Random()
-            val startTime = System.currentTimeMillis() - 25L * 24 * 60 * 60 * 1000 // 25 days ago
+            val dayMillis = 24L * 60 * 60 * 1000
+            val startTime = System.currentTimeMillis() - 30L * dayMillis
+            val labels = listOf("Supermercado", "Transporte", "Farmacia", "Restaurante", "Suscripción", "Servicios", "Materiales", "Combustible")
             val mockCategories = current.categories.map { category ->
-                val mockExpenses = (1..3).map { i ->
+                val mockExpenses = (0 until 8).map { index ->
+                    val amount = BigDecimal(random.nextInt(4500) + 250)
                     Expense(
                         UUID.randomUUID().toString(),
-                        "Gasto Mock $i",
-                        BigDecimal(random.nextInt(1000) + 100),
-                        current.incomeRate,
-                        startTime + random.nextLong() % (20L * 24 * 60 * 60 * 1000)
+                        "${labels[index]} ${category.name.lowercase(Locale.getDefault())}",
+                        amount,
+                        BigDecimal(random.nextInt(16) + 5),
+                        startTime + random.nextLong(30L * dayMillis)
                     )
                 }
                 category.copy(rows = category.rows + mockExpenses)
             }
-            persist(current.copy(categories = mockCategories))
+            val mockDebts = current.debts + listOf(
+                Debt("Tarjeta Mock", BigDecimal("8500"), BigDecimal("1750")),
+                Debt("Préstamo Mock", BigDecimal("12000"), BigDecimal("3000"))
+            )
+            persist(
+                current.copy(
+                    incomeBs = current.incomeBs + BigDecimal("25000"),
+                    conversionBs = current.conversionBs + BigDecimal("3500"),
+                    categories = mockCategories,
+                    debts = mockDebts
+                )
+            )
         }
     }
 
@@ -181,13 +195,12 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
             saving = true
             scope.launch {
                 runCatching {
-                    val seed = withContext(Dispatchers.IO) { SeedLoader.load(context) }
-                    withContext(Dispatchers.IO) { repository.clearAllAndSeed(seed) }
+                    withContext(Dispatchers.IO) { repository.clearAll() }
                 }.onSuccess {
                     budget = null
+                    dataCleared = true
                     selectedCategoryName = null
                     dateFilter = null
-                    withContext(Dispatchers.IO) { budget = repository.loadOrSeed(SeedLoader.load(context)) }
                 }.onFailure {
                     error = "No se pudo limpiar los datos."
                 }
@@ -199,6 +212,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
             error != null && budget == null -> ErrorState(error!!)
+            dataCleared && budget == null -> EmptyState()
             budget == null -> LoadingState()
             else -> if (showSummary) {
                 BudgetSummaryScreen(budget = budget!!, onBack = { showSummary = false })
@@ -308,6 +322,19 @@ private fun ErrorState(message: String) {
     }
 }
 
+@Composable
+private fun EmptyState() {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Presupuesto vacío", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("Todos los datos guardados fueron eliminados. Cierra y vuelve a abrir la aplicación para cargar el presupuesto inicial.")
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BudgetScreen(
@@ -338,7 +365,7 @@ private fun BudgetScreen(
             TopAppBar(
                 title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = FinanceAccent,
+                    containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = Color.White,
                     actionIconContentColor = Color.White
                 ),
@@ -397,6 +424,8 @@ private fun BudgetScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
                         listOf(1 to "1d", 7 to "7d", 30 to "30d").forEach { (days, label) ->
                             FilterChip(
                                 modifier = Modifier.height(32.dp),
@@ -405,8 +434,6 @@ private fun BudgetScreen(
                                 label = { Text(label) }
                             )
                         }
-                        Spacer(Modifier.weight(1f))
-                        Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     if (dateFilter != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -499,11 +526,11 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
 
     if (dataPoints.isEmpty()) return
 
-    val graphColor = FinanceAccent
+    val graphColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     val gridColorSecondary = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
-    Canvas(modifier.padding(start = 28.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
+    Canvas(modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
         val width = size.width
         val height = size.height
         val maxVal = dataPoints.maxOf { it }.toFloat().coerceAtLeast(1f)
@@ -542,11 +569,6 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
             textSize = 10.dp.toPx()
             isAntiAlias = true
         }
-        val middleValue = BigDecimal.valueOf((maxVal + minVal) / 2.0)
-        drawContext.canvas.nativeCanvas.drawText("${BigDecimal.valueOf(maxVal.toDouble()).display()}", 0f, axisPaint.textSize, axisPaint)
-        drawContext.canvas.nativeCanvas.drawText(middleValue.display(), 0f, height / 2f, axisPaint)
-        drawContext.canvas.nativeCanvas.drawText("${BigDecimal.valueOf(minVal.toDouble()).display()}", 0f, height, axisPaint)
-
         val dateFormat = SimpleDateFormat(if (rangeDays == 1) "HH:mm" else "dd/MM", Locale.getDefault())
         val labels = expenses.map { dateFormat.format(Date(it.timestamp)) }
         if (labels.isNotEmpty()) {
