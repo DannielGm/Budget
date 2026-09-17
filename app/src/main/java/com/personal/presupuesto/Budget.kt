@@ -52,10 +52,38 @@ data class Budget(
     // September K6 is unguarded, unlike row conversion formulas. Show unavailable at zero rate.
     val balanceUsd: BigDecimal? get() = if (incomeRate.signum() == 0) null else convert(balanceBs, incomeRate)
 
-    fun filteredCategories(dateFilter: Long?): List<Category> {
+    fun filteredCategories(dateFilter: Long?, rangeDays: Int = 1): List<Category> {
         if (dateFilter == null) return categories
+        val start = Calendar.getInstance().apply {
+            timeInMillis = dateFilter
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (rangeDays >= 30) {
+                set(Calendar.DAY_OF_MONTH, 1)
+            } else {
+                add(Calendar.DAY_OF_MONTH, -(rangeDays.coerceAtLeast(1) - 1))
+            }
+        }.timeInMillis
+        val end = Calendar.getInstance().apply {
+            timeInMillis = dateFilter
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (rangeDays >= 30) {
+                set(Calendar.DAY_OF_MONTH, 1)
+                add(Calendar.MONTH, 1)
+            } else {
+                add(Calendar.DAY_OF_MONTH, 1)
+            }
+        }.timeInMillis
         return categories.map { category ->
-            category.copy(rows = category.rows.filter { expense -> expense.timestamp.sameDayAs(dateFilter) })
+            category.copy(rows = category.rows.filter { expense ->
+                if (rangeDays <= 1) expense.timestamp.sameDayAs(dateFilter)
+                else expense.timestamp >= start && expense.timestamp < end
+            })
         }.filter { it.rows.isNotEmpty() }
     }
 }

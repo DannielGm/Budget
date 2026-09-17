@@ -25,8 +25,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -43,6 +45,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,10 +72,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.util.Date
 import java.util.Locale
 import java.util.Calendar as JavaCalendar
@@ -87,7 +93,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Random
 
-private fun BigDecimal.display(): String = setScale(2, RoundingMode.HALF_UP).toPlainString()
+private fun BigDecimal.display(): String = DecimalFormat(
+    "#,##0.00",
+    DecimalFormatSymbols(Locale("es", "ES"))
+).format(setScale(2, RoundingMode.HALF_UP))
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,7 +125,9 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var saving by remember { mutableStateOf(false) }
     var selectedCategoryName by remember { mutableStateOf<String?>(null) }
     var dateFilter by remember { mutableStateOf<Long?>(null) }
+    var graphRangeDays by remember { mutableStateOf(1) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showSummary by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -187,24 +198,34 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         when {
             error != null && budget == null -> ErrorState(error!!)
             budget == null -> LoadingState()
-            else -> BudgetScreen(
-                budget = budget!!,
-                saving = saving,
-                selectedCategoryName = selectedCategoryName,
-                isDarkTheme = isDarkTheme,
-                dateFilter = dateFilter,
-                onThemeToggle = onThemeToggle,
-                onCategorySelect = { selectedCategoryName = it },
-                onDateFilterChange = { dateFilter = it },
-                onEditBudget = { editingBudget = true },
-                onEditDebt = { editingDebt = it },
-                onAddExpense = { addingToCategory = it },
-                onEditExpense = { category, expense -> editingExpense = category to expense },
-                onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
-                onFillMockData = { fillMockData() },
-                onClearAllData = { clearAllData() },
-                onOpenDatePicker = { showDatePicker = true }
-            )
+            else -> if (showSummary) {
+                BudgetSummaryScreen(budget = budget!!, onBack = { showSummary = false })
+            } else {
+                BudgetScreen(
+                    budget = budget!!,
+                    saving = saving,
+                    selectedCategoryName = selectedCategoryName,
+                    isDarkTheme = isDarkTheme,
+                    dateFilter = dateFilter,
+                    graphRangeDays = graphRangeDays,
+                    onThemeToggle = onThemeToggle,
+                    onCategorySelect = { selectedCategoryName = it },
+                    onDateFilterChange = { dateFilter = it },
+                    onRangeChange = { days ->
+                        graphRangeDays = days
+                        if (dateFilter == null) dateFilter = System.currentTimeMillis()
+                    },
+                    onEditBudget = { editingBudget = true },
+                    onOpenSummary = { showSummary = true },
+                    onEditDebt = { editingDebt = it },
+                    onAddExpense = { addingToCategory = it },
+                    onEditExpense = { category, expense -> editingExpense = category to expense },
+                    onDeleteExpense = { categoryName, expense -> persist(budget!!.withoutExpense(categoryName, expense.id)) },
+                    onFillMockData = { fillMockData() },
+                    onClearAllData = { clearAllData() },
+                    onOpenDatePicker = { showDatePicker = true }
+                )
+            }
         }
     }
 
@@ -263,7 +284,7 @@ private fun DateFilterPicker(show: Boolean, onDismiss: () -> Unit, onSelect: (Lo
             TextButton(onClick = onDismiss) { Text("Cancelar") }
         }
     ) {
-        DatePicker(state = pickerState, title = null)
+        DatePicker(state = pickerState, title = null, showModeToggle = false)
     }
 }
 
@@ -293,10 +314,13 @@ private fun BudgetScreen(
     selectedCategoryName: String?,
     isDarkTheme: Boolean,
     dateFilter: Long?,
+    graphRangeDays: Int,
     onThemeToggle: () -> Unit,
     onCategorySelect: (String) -> Unit,
     onDateFilterChange: (Long?) -> Unit,
+    onRangeChange: (Int) -> Unit,
     onEditBudget: () -> Unit,
+    onOpenSummary: () -> Unit,
     onEditDebt: (Debt) -> Unit,
     onAddExpense: (String) -> Unit,
     onEditExpense: (String, Expense) -> Unit,
@@ -359,28 +383,28 @@ private fun BudgetScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            BalanceCard(budget, onEditBudget)
-            Spacer(Modifier.height(14.dp))
-            MetricsRow(budget)
-            Spacer(Modifier.height(14.dp))
+            BalanceCard(budget, onEditBudget, onOpenSummary)
+            Spacer(Modifier.height(12.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Flujo del mes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (dateFilter != null) {
-                                Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter)), style = MaterialTheme.typography.labelMedium)
-                                TextButton(onClick = { onDateFilterChange(null) }) { Text("Limpiar") }
-                            } else {
-                                TextButton(onClick = onOpenDatePicker) { Text("Filtrar fecha") }
-                            }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Flujo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        if (dateFilter != null) {
+                            Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(dateFilter)), style = MaterialTheme.typography.labelMedium)
+                            TextButton(onClick = { onDateFilterChange(null) }) { Text("Todo") }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(1 to "1d", 7 to "7d", 30 to "30d").forEach { (days, label) ->
+                            FilterChip(
+                                selected = graphRangeDays == days,
+                                onClick = { onRangeChange(days) },
+                                label = { Text(label) }
+                            )
                         }
                     }
                     BudgetGraph(
@@ -391,7 +415,8 @@ private fun BudgetScreen(
                             .pointerInput(Unit) {
                                 detectTapGestures(onTap = { onOpenDatePicker() })
                             },
-                        dateFilter = dateFilter
+                        dateFilter = dateFilter,
+                        rangeDays = graphRangeDays
                     )
                 }
             }
@@ -399,7 +424,7 @@ private fun BudgetScreen(
             DebtCard(budget, onEditDebt)
             Spacer(Modifier.height(16.dp))
 
-            val filteredCategories = budget.filteredCategories(dateFilter)
+            val filteredCategories = budget.filteredCategories(dateFilter, graphRangeDays)
             val selectedCategory = filteredCategories.find { it.name == selectedCategoryName } ?: filteredCategories.firstOrNull()
             if (selectedCategory != null) {
                 LazyColumn(
@@ -421,8 +446,8 @@ private fun BudgetScreen(
 }
 
 @Composable
-private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = null) {
-    val expenses = (if (dateFilter == null) budget.categories else budget.filteredCategories(dateFilter)).flatMap { it.rows }.sortedBy { it.timestamp }
+private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = null, rangeDays: Int = 1) {
+    val expenses = (if (dateFilter == null) budget.categories else budget.filteredCategories(dateFilter, rangeDays)).flatMap { it.rows }.sortedBy { it.timestamp }
     val income = budget.incomeBs
     val conversion = budget.conversionBs
 
@@ -445,7 +470,8 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
     val primaryColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     val gridColorSecondary = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-    Canvas(modifier.padding(8.dp)) {
+    val axisColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+    Canvas(modifier.padding(start = 40.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
         val width = size.width
         val height = size.height
         val maxVal = dataPoints.maxOf { it }.toFloat().coerceAtLeast(1f)
@@ -478,6 +504,27 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         drawPath(path, primaryColor, style = Stroke(width = 3.dp.toPx()))
+
+        val axisPaint = android.graphics.Paint().apply {
+            color = axisColor
+            textSize = 10.dp.toPx()
+            isAntiAlias = true
+        }
+        val middleValue = BigDecimal.valueOf((maxVal + minVal) / 2.0)
+        drawContext.canvas.nativeCanvas.drawText("${BigDecimal.valueOf(maxVal.toDouble()).display()}", 0f, axisPaint.textSize, axisPaint)
+        drawContext.canvas.nativeCanvas.drawText(middleValue.display(), 0f, height / 2f, axisPaint)
+        drawContext.canvas.nativeCanvas.drawText("${BigDecimal.valueOf(minVal.toDouble()).display()}", 0f, height, axisPaint)
+
+        val dateFormat = SimpleDateFormat("dd/MM", Locale.getDefault())
+        val labels = expenses.map { dateFormat.format(Date(it.timestamp)) }
+        if (labels.isNotEmpty()) {
+            val lastIndex = labels.lastIndex
+            drawContext.canvas.nativeCanvas.drawText(labels.first(), 0f, height + 18.dp.toPx(), axisPaint)
+            if (lastIndex > 1) {
+                drawContext.canvas.nativeCanvas.drawText(labels[lastIndex / 2], width / 2f, height + 18.dp.toPx(), axisPaint)
+            }
+            drawContext.canvas.nativeCanvas.drawText(labels.last(), width - axisPaint.measureText(labels.last()), height + 18.dp.toPx(), axisPaint)
+        }
     }
 }
 
@@ -489,7 +536,7 @@ private fun CategoryCardContent(
     onDelete: (String, Expense) -> Unit
 ) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(category.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -505,6 +552,7 @@ private fun CategoryCardContent(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .padding(vertical = 2.dp)
                         .clickable { onEdit(category.name, expense) },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -528,9 +576,11 @@ private fun CategoryCardContent(
 }
 
 @Composable
-private fun BalanceCard(budget: Budget, onEdit: () -> Unit) {
+private fun BalanceCard(budget: Budget, onEdit: () -> Unit, onOpenSummary: () -> Unit) {
     Card(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenSummary),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -547,11 +597,35 @@ private fun BalanceCard(budget: Budget, onEdit: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MetricsRow(budget: Budget) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        MetricCard("Ingresos", "Bs ${budget.incomeBs.display()}", Modifier.weight(1f))
-        MetricCard("Gastos de caja", "Bs ${budget.cashBs.display()}", Modifier.weight(1f))
+private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Resumen del presupuesto", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(budget.monthLabel, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            MetricCard("Ingresos", "Bs ${budget.incomeBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Gastos", "Bs ${budget.cashBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Conversión", "Bs ${budget.conversionBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Saldo disponible", "Bs ${budget.balanceBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Deuda total", "Bs ${budget.debtBs.display()}", Modifier.fillMaxWidth())
+        }
     }
 }
 
