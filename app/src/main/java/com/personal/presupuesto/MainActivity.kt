@@ -136,7 +136,6 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var showDatePicker by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showDebtSummary by remember { mutableStateOf(false) }
-    var showCategoryPicker by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(budget) {
@@ -547,8 +546,23 @@ private fun BudgetScreen(
                     }
                 }
             } else {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text(if (dateFilter != null) "No hay gastos en esa fecha" else "Selecciona una categoría", style = MaterialTheme.typography.bodyLarge)
+                Column(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        if (dateFilter != null) "No hay gastos en esa fecha" else "No hay categorías de gastos",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (dateFilter == null) {
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = { showCategoryPicker = true }) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.size(6.dp))
+                            Text("Crear categoría")
+                        }
+                    }
                 }
             }
         }
