@@ -9,6 +9,21 @@ class BudgetTest {
     @Test fun zeroRowRateReturnsZero() {
         assertEquals(0, convert(n("500"), n("0")).compareTo(BigDecimal.ZERO))
     }
+
+    @Test fun zeroExpenseRateUsesBudgetRateForDisplayTotals() {
+        val budget = Budget(
+            "Septiembre",
+            n("1000"),
+            n("10"),
+            n("0"),
+            listOf(
+                Category("HOGAR", true, listOf(Expense("1", "Agua", n("500"), n("0"))))
+            )
+        )
+
+        assertEquals(0, budget.cashUsd.compareTo(n("50")))
+        assertEquals(0, budget.categories.first().totalUsdAt(n("10")).compareTo(n("50")))
+    }
     @Test fun cashBalanceExcludesCreditAndDeductsConversions() {
         val budget = Budget("Septiembre", n("1000"), n("10"), n("100"), listOf(
             Category("HOGAR", true, listOf(Expense("1", "Internet", n("200"), n("20")))),

@@ -24,10 +24,12 @@ data class Expense(
     val timestamp: Long = System.currentTimeMillis()
 ) {
     val amountUsd: BigDecimal get() = convert(amountBs, rate)
+    fun amountUsdAt(defaultRate: BigDecimal): BigDecimal = convert(amountBs, if (rate.signum() == 0) defaultRate else rate)
 }
 data class Category(val name: String, val cashExpense: Boolean, val rows: List<Expense>) {
     val totalBs: BigDecimal get() = rows.fold(BigDecimal.ZERO) { total, row -> total + row.amountBs }
     val totalUsd: BigDecimal get() = rows.fold(BigDecimal.ZERO) { total, row -> total + row.amountUsd }
+    fun totalUsdAt(defaultRate: BigDecimal): BigDecimal = rows.fold(BigDecimal.ZERO) { total, row -> total + row.amountUsdAt(defaultRate) }
 }
 data class Debt(val label: String, val openingBs: BigDecimal, val paymentBs: BigDecimal) {
     val remainingBs: BigDecimal get() = openingBs - paymentBs
@@ -47,7 +49,7 @@ data class Budget(
 
     val incomeUsd: BigDecimal get() = convert(incomeBs, incomeRate)
     val cashBs: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
-    val cashUsd: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalUsd }
+    val cashUsd: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalUsdAt(incomeRate) }
     val balanceBs: BigDecimal get() = incomeBs - cashBs - conversionBs
     // September K6 is unguarded, unlike row conversion formulas. Show unavailable at zero rate.
     val balanceUsd: BigDecimal? get() = if (incomeRate.signum() == 0) null else convert(balanceBs, incomeRate)

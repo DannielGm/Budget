@@ -25,6 +25,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -514,18 +520,30 @@ private fun BudgetScreen(
                         }
                     }
                     item {
-                        CategoryCardContent(
-                            category = selectedCategory,
-                            onCategoryClick = { showCategoryPicker = true },
-                            onSwipeCategory = { direction ->
-                                val currentIndex = budget.categories.indexOfFirst { it.name == selectedCategory.name }
-                                val nextIndex = (currentIndex + direction).mod(budget.categories.size)
-                                onCategorySelect(budget.categories[nextIndex].name)
+                        AnimatedContent(
+                            targetState = selectedCategory.name,
+                            transitionSpec = {
+                                (slideInHorizontally { it / 2 } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { -it / 2 } + fadeOut()
+                                )
                             },
-                            onAdd = onAddExpense,
-                            onEdit = onEditExpense,
-                            onDelete = onDeleteExpense
-                        )
+                            label = "category card transition"
+                        ) { categoryName ->
+                            val animatedCategory = budget.categories.firstOrNull { it.name == categoryName } ?: selectedCategory
+                            CategoryCardContent(
+                                category = animatedCategory,
+                                defaultRate = budget.incomeRate,
+                                onCategoryClick = { showCategoryPicker = true },
+                                onSwipeCategory = { direction ->
+                                    val currentIndex = budget.categories.indexOfFirst { it.name == animatedCategory.name }
+                                    val nextIndex = (currentIndex + direction).mod(budget.categories.size)
+                                    onCategorySelect(budget.categories[nextIndex].name)
+                                },
+                                onAdd = onAddExpense,
+                                onEdit = onEditExpense,
+                                onDelete = onDeleteExpense
+                            )
+                        }
                     }
                 }
             } else {
@@ -636,6 +654,7 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
 @Composable
 private fun CategoryCardContent(
     category: Category,
+    defaultRate: BigDecimal,
     onCategoryClick: () -> Unit,
     onSwipeCategory: (Int) -> Unit,
     onAdd: (String) -> Unit,
@@ -683,7 +702,7 @@ private fun CategoryCardContent(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(expense.label, style = MaterialTheme.typography.bodyLarge)
-                        Text("$ ${expense.amountUsd.display()}  ·  Bs ${expense.amountBs.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$ ${expense.amountUsdAt(defaultRate).display()}  ·  Bs ${expense.amountBs.display()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             "${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(expense.timestamp))}",
                             style = MaterialTheme.typography.bodySmall,
@@ -695,7 +714,7 @@ private fun CategoryCardContent(
                 }
             }
             HorizontalDivider()
-            Text("Total  $ ${category.totalUsd.display()}  ·  Bs ${category.totalBs.display()}", fontWeight = FontWeight.SemiBold)
+            Text("Total  $ ${category.totalUsdAt(defaultRate).display()}  ·  Bs ${category.totalBs.display()}", fontWeight = FontWeight.SemiBold)
         }
     }
 }
