@@ -98,6 +98,8 @@ private fun BigDecimal.display(): String = DecimalFormat(
     DecimalFormatSymbols(Locale("es", "ES"))
 ).format(setScale(2, RoundingMode.HALF_UP))
 
+private val FinanceAccent = Color(0xFF2905A1)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -336,9 +338,9 @@ private fun BudgetScreen(
             TopAppBar(
                 title = { Text(budget.monthLabel, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    titleContentColor = MaterialTheme.colorScheme.onSecondary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSecondary
+                    containerColor = FinanceAccent,
+                    titleContentColor = Color.White,
+                    actionIconContentColor = Color.White
                 ),
                 actions = {
                     if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), strokeWidth = 2.dp, color = Color.White)
@@ -497,7 +499,7 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
 
     if (dataPoints.isEmpty()) return
 
-    val graphColor = MaterialTheme.colorScheme.secondary
+    val graphColor = FinanceAccent
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     val gridColorSecondary = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
