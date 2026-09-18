@@ -27,7 +27,6 @@ data class BudgetEntity(
     val monthLabel: String,
     val incomeBs: String,
     val incomeRate: String,
-    val conversionBs: String,
     val openingBalanceBs: String
 )
 
@@ -150,33 +149,19 @@ interface BudgetDao {
     entities = [BudgetEntity::class, CategoryEntity::class, ExpenseEntity::class, DebtEntity::class, ExchangeRateEntity::class],
     // v3 moves month ids to sortable YYYY-MM values.
     // v4 adds the carried opening balance and the BCV exchange-rate cache, non-destructively.
-    version = 4,
+    // v5 removes conversionBs, destructive migration.
+    version = 5,
     exportSchema = false
 )
 abstract class BudgetDatabase : RoomDatabase() {
     abstract fun budgetDao(): BudgetDao
 
     companion object {
-        // v3 → v4 is non-destructive on purpose: stored months, their history, and the
-        // September seed survive the upgrade. Existing month rates keep their stored value
-        // until the BCV refresh repairs them.
-        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
-            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE budgets ADD COLUMN openingBalanceBs TEXT NOT NULL DEFAULT '0'")
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS exchange_rates (" +
-                        "dateIso TEXT NOT NULL PRIMARY KEY, " +
-                        "rateBsPerUsd TEXT NOT NULL, " +
-                        "fetchedAt INTEGER NOT NULL)"
-                )
-            }
-        }
-
         fun create(context: Context): BudgetDatabase = Room.databaseBuilder(
             context,
             BudgetDatabase::class.java,
             "presupuesto.db"
-        ).addMigrations(MIGRATION_3_4).build()
+        ).fallbackToDestructiveMigration().build()
     }
 }
 
@@ -223,7 +208,6 @@ class BudgetRepository(
             monthLabel = monthDisplayName(monthId),
             incomeBs = BigDecimal.ZERO,
             incomeRate = exchange?.monthRateFor(monthId) ?: BigDecimal.ZERO,
-            conversionBs = BigDecimal.ZERO,
             categories = template.categories.map { it.copy(rows = emptyList()) },
             debts = carryDebtsFrom(predecessor),
             openingBalanceBs = predecessor?.balanceBs ?: BigDecimal.ZERO
@@ -251,7 +235,6 @@ class BudgetRepository(
             monthDisplayName(record.monthId),
             record.incomeBs.toBigDecimal(),
             record.incomeRate.toBigDecimal(),
-            record.conversionBs.toBigDecimal(),
             categories.map { category ->
                 Category(category.name, category.cashExpense, expenses[category.name].orEmpty().map {
                     Expense(it.id, it.label, it.amountBs.toBigDecimal(), it.rate.toBigDecimal(), it.timestamp)
@@ -274,7 +257,7 @@ class BudgetRepository(
             dao.deleteCategories(monthId)
             dao.deleteExpenses(monthId)
             dao.deleteDebts(monthId)
-            dao.insertBudget(BudgetEntity(monthId, monthLabel, budget.incomeBs.toPlainString(), budget.incomeRate.toPlainString(), budget.conversionBs.toPlainString(), budget.openingBalanceBs.toPlainString()))
+            dao.insertBudget(BudgetEntity(monthId, monthLabel, budget.incomeBs.toPlainString(), budget.incomeRate.toPlainString(), budget.openingBalanceBs.toPlainString()))
             dao.insertCategories(budget.categories.mapIndexed { index, category -> CategoryEntity(monthId, category.name, category.cashExpense, index) })
             dao.insertExpenses(budget.categories.flatMap { category -> category.rows.mapIndexed { index, expense ->
                 ExpenseEntity(monthId, expense.id, category.name, expense.label, expense.amountBs.toPlainString(), expense.rate.toPlainString(), expense.timestamp, index)
@@ -308,7 +291,7 @@ class BudgetRepository(
     suspend fun clearMonth(monthId: String): Budget = database.withTransaction {
         val current = load(monthId) ?: error("Mes no encontrado")
         val cleared = current.copy(
-            incomeBs = BigDecimal.ZERO, incomeRate = BigDecimal.ZERO, conversionBs = BigDecimal.ZERO,
+            incomeBs = BigDecimal.ZERO, incomeRate = BigDecimal.ZERO,
             categories = current.categories.map { it.copy(rows = emptyList()) }, debts = emptyList(),
             openingBalanceBs = BigDecimal.ZERO
         )

@@ -33,6 +33,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -81,8 +83,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
@@ -225,7 +229,6 @@ private fun BudgetApp(repository: BudgetRepository, exchange: ExchangeRateReposi
             persist(
                 current.copy(
                     incomeBs = current.incomeBs + BigDecimal("25000"),
-                    conversionBs = current.conversionBs + BigDecimal("3500"),
                     categories = mockCategories,
                     debts = mockDebts
                 )
@@ -373,6 +376,7 @@ private fun BudgetApp(repository: BudgetRepository, exchange: ExchangeRateReposi
                         }
                     },
                     onEditBudget = { editingBudget = true },
+                    onGoToToday = { switchMonth(currentMonthId(), null) },
                     onOpenSummary = { showSummary = true },
                     onOpenDebtSummary = { showDebtSummary = true },
                     onAddCategory = { category ->
@@ -540,6 +544,7 @@ private fun BudgetScreen(
     onDateFilterChange: (Long?) -> Unit,
     onRangeChange: (Int) -> Unit,
     onEditBudget: () -> Unit,
+    onGoToToday: () -> Unit,
     onOpenSummary: () -> Unit,
     onOpenDebtSummary: () -> Unit,
     onAddCategory: (Category) -> Unit,
@@ -568,16 +573,10 @@ private fun BudgetScreen(
                     ) {
                         Text(
                             text = if (dateFilter == null) monthDisplayName(budget.monthId)
-                            else "${SimpleDateFormat("d", Locale.getDefault()).format(Date(dateFilter))} - ${monthName(budget.monthId)}",
+                            else "${monthName(budget.monthId)} - ${SimpleDateFormat("d", Locale.getDefault()).format(Date(dateFilter))}",
                             style = BudgetTypography.brandHeadline,
-                            color = Color.White
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Icon(
-                            Icons.Default.DateRange,
-                            contentDescription = "Cambiar mes",
-                            tint = Color.White,
-                            modifier = Modifier.padding(bottom = 4.dp).size(20.dp)
+                            color = Color.White,
+                            modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
                     if (showMonthPicker) {
@@ -595,6 +594,10 @@ private fun BudgetScreen(
             },
             actions = {
                 if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), color = Color.White)
+                val isNotToday = budget.monthId != currentMonthId() || dateFilter != null
+                if (isNotToday) {
+                    IconButton(onClick = onGoToToday) { Icon(Icons.Default.Home, "Ir a hoy", tint = Color.White) }
+                }
                 IconButton(onClick = onThemeToggle) {
                     Icon(
                         if (isDarkTheme) Icons.Default.WbSunny else Icons.Default.NightsStay,
@@ -791,10 +794,9 @@ private fun BudgetScreen(
 private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = null, rangeDays: Int = 1) {
     val expenses = (if (dateFilter == null) budget.categories else budget.filteredCategories(dateFilter, rangeDays)).flatMap { it.rows }.sortedBy { it.timestamp }
     val income = budget.incomeBs
-    val conversion = budget.conversionBs
 
-    val dataPoints = remember(expenses, income, conversion, budget.openingBalanceBs) {
-        var currentBalance = budget.openingBalanceBs + income - conversion
+    val dataPoints = remember(expenses, income, budget.openingBalanceBs) {
+        var currentBalance = budget.openingBalanceBs + income
         val points = mutableListOf<BigDecimal>()
         points.add(currentBalance)
         expenses.forEach {
@@ -950,18 +952,16 @@ private fun BalanceCard(
             .clickable(onClick = onOpenSummary),
         containerColor = BudgetTheme.colors.primary.copy(alpha = 0.96f)
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Saldo disponible", color = BudgetTheme.colors.onPrimary.copy(alpha = .82f), style = BudgetTypography.labelLarge)
-                Spacer(Modifier.weight(1f))
                 rateBadge?.let {
                     Text(
                         it + if (rateStale) " (sin actualizar)" else "",
-                        color = BudgetTheme.colors.onPrimary.copy(alpha = .82f),
+                        color = BudgetTheme.colors.onPrimary.copy(alpha = .85f),
                         style = BudgetTypography.labelMedium
                     )
                 }
-                Spacer(Modifier.size(4.dp))
+                Spacer(Modifier.weight(1f))
                 IconButton(onClick = onRefreshRate, enabled = !rateRefreshing) {
                     if (rateRefreshing) {
                         CircularProgressIndicator(Modifier.size(18.dp), color = BudgetTheme.colors.onPrimary)
@@ -970,13 +970,38 @@ private fun BalanceCard(
                     }
                 }
             }
-            Text("$ ${budget.balanceUsdAt(contextRate)?.display() ?: BigDecimal.ZERO.display()}", color = BudgetTheme.colors.onPrimary, style = BudgetTypography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("Bs ${budget.balanceBs.display()}", color = BudgetTheme.colors.onPrimary.copy(alpha = .9f), style = BudgetTypography.bodyLarge)
-            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "$ ${budget.balanceUsdAt(contextRate)?.display() ?: BigDecimal.ZERO.display()}",
+                color = BudgetTheme.colors.onPrimary,
+                style = BudgetTypography.brandHeadline.copy(fontSize = 42.sp, fontFamily = FontFamily.Serif),
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                text = "Bs ${budget.balanceBs.display()}",
+                color = BudgetTheme.colors.onPrimary.copy(alpha = .9f),
+                style = BudgetTypography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            
+            HorizontalDivider()
+            
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("Ingresos", color = BudgetTheme.colors.onPrimary.copy(alpha = .7f), style = BudgetTypography.labelSmall)
+                    Text("Bs ${budget.incomeBs.display()}", color = BudgetTheme.colors.onPrimary, style = BudgetTypography.bodyMedium, fontWeight = FontWeight.Bold)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Gastos de caja", color = BudgetTheme.colors.onPrimary.copy(alpha = .7f), style = BudgetTypography.labelSmall)
+                    Text("Bs ${budget.cashBs.display()}", color = BudgetTheme.colors.onPrimary, style = BudgetTypography.bodyMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
             OutlinedButton(
                 onClick = onEdit,
-                border = androidx.compose.foundation.BorderStroke(1.dp, BudgetTheme.colors.onPrimary.copy(alpha = 0.6f))
-            ) { Text("Ajustar ingresos y conversiones", color = BudgetTheme.colors.onPrimary) }
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, BudgetTheme.colors.onPrimary.copy(alpha = 0.5f))
+            ) { Text("Ingresos", color = BudgetTheme.colors.onPrimary) }
         }
     }
 }
@@ -1001,7 +1026,6 @@ private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
             Text(monthDisplayName(budget.monthId), style = BudgetTypography.headlineSmall, fontWeight = FontWeight.Bold)
             MetricCard("Ingresos", "$ ${budget.incomeUsd.display()}", Modifier.fillMaxWidth())
             MetricCard("Gastos", "$ ${budget.cashUsd.display()}", Modifier.fillMaxWidth())
-            MetricCard("Conversión", "$ ${convert(budget.conversionBs, budget.incomeRate).display()}", Modifier.fillMaxWidth())
             MetricCard("Saldo inicial", "$ ${(if (budget.incomeRate.signum() == 0) BigDecimal.ZERO else convert(budget.openingBalanceBs, budget.incomeRate)).display()}  ·  Bs ${budget.openingBalanceBs.display()}", Modifier.fillMaxWidth())
             MetricCard("Tasa BCV del mes", "${budget.incomeRate.display()} Bs/USD", Modifier.fillMaxWidth())
             MetricCard("Saldo disponible", "$ ${budget.balanceUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
@@ -1009,6 +1033,10 @@ private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
         }
     }
 }
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
+private fun MetricsRow(budget: Budget) {}
 
 @Composable
 private fun MetricCard(label: String, value: String, modifier: Modifier) {
@@ -1168,25 +1196,40 @@ private fun DebtSummaryScreen(
 private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (Budget) -> Unit) {
     var income by remember { mutableStateOf("") }
     var opening by remember { mutableStateOf(budget.openingBalanceBs.toPlainString()) }
-    var conversion by remember { mutableStateOf(budget.conversionBs.toPlainString()) }
+    var overrideRate by remember { mutableStateOf(budget.incomeRate.toPlainString()) }
     var isAdditive by remember { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var showOpening by remember { mutableStateOf(false) }
     var invalid by remember { mutableStateOf(false) }
 
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Editar resumen") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ingresos") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             MoneyField(if (isAdditive) "Monto a añadir" else "Ingreso total en Bs", income) { income = it }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = isAdditive, onCheckedChange = { isAdditive = it })
                 Text("Sumar al ingreso actual (Bs ${budget.incomeBs.display()})", style = BudgetTypography.bodyMedium)
             }
-            MoneyField("Conversión en Bs", conversion) { conversion = it }
-            // Phase 4.3: the BCV rate is managed automatically and is no longer editable.
-            Text(
-                "Tasa BCV del mes: ${budget.incomeRate.display()} Bs/USD (automática)",
-                style = BudgetTypography.bodyMedium,
-                color = BudgetTheme.colors.onSurfaceVariant
-            )
-            MoneyField("Saldo inicial arrastrado en Bs", opening) { opening = it }
+            
+            TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                Text(if (showAdvanced) "Ocultar opciones avanzadas" else "Ver opciones avanzadas")
+            }
+            
+            if (showAdvanced) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = showOpening, onCheckedChange = { showOpening = it })
+                    Text("Editar saldo inicial", style = BudgetTypography.bodyMedium)
+                }
+                if (showOpening) {
+                    MoneyField("Saldo inicial en Bs", opening) { opening = it }
+                }
+                MoneyField("Tasa BCV (Sobrescribir)", overrideRate) { overrideRate = it }
+                Text(
+                    "Tasa BCV actual del mes: ${budget.incomeRate.display()} Bs/USD",
+                    style = BudgetTypography.bodySmall,
+                    color = BudgetTheme.colors.onSurfaceVariant
+                )
+            }
+            
             if (invalid) Text("Usa números válidos y valores no negativos.", color = BudgetTheme.colors.error)
         }
     }, confirmButton = {
@@ -1195,11 +1238,11 @@ private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (B
             Button(onClick = {
                 val parsedIncome = income.toBigDecimalOrNull() ?: if (isAdditive) BigDecimal.ZERO else budget.incomeBs
                 val parsedOpening = opening.toBigDecimalOrNull()
-                val parsedConversion = conversion.toBigDecimalOrNull()
+                val parsedRate = overrideRate.toBigDecimalOrNull()
 
-                if (parsedOpening != null && parsedConversion != null && parsedConversion.signum() >= 0 && parsedIncome.signum() >= 0) {
+                if (parsedOpening != null && parsedRate != null && parsedRate.signum() >= 0 && parsedIncome.signum() >= 0) {
                     val finalIncome = if (isAdditive) budget.incomeBs + parsedIncome else parsedIncome
-                    onSave(budget.copy(incomeBs = finalIncome, conversionBs = parsedConversion, openingBalanceBs = parsedOpening))
+                    onSave(budget.copy(incomeBs = finalIncome, incomeRate = parsedRate, openingBalanceBs = parsedOpening))
                 } else invalid = true
             }) { Text("Guardar") }
         }

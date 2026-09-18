@@ -12,14 +12,10 @@ object SeedLoader {
         require(root.getInt("schemaVersion") == 1)
         require(root.getString("sourceSheet") == "September")
         val categories = root.getJSONArray("categories")
-        val conversions = root.getJSONArray("conversions")
         return Budget(
             root.getString("monthLabel"),
             root.getString("incomeBs").toBigDecimal(),
             root.getString("incomeRate").toBigDecimal(),
-            (0 until conversions.length()).fold(BigDecimal.ZERO) { sum, i ->
-                sum + conversions.getJSONObject(i).getString("amountBs").toBigDecimal()
-            },
             (0 until categories.length()).map { i ->
                 val category = categories.getJSONObject(i)
                 val rows = category.getJSONArray("rows")

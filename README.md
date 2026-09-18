@@ -133,7 +133,16 @@ Room stores each month in the app's private database. This is persistence, not e
 - Enabled interactive graph tapping: touching the graph now triggers the calendar picker for day filtering.
 - App version: `0.4.3.1` (`versionCode=9`).
 
-## Planned Phase 4 — Multi-month budget model
+### Phase 4.3.2 — UX Consolidation and Dynamic Context
+- Consolidated the dashboard: integrated "Ingresos" and "Gastos de caja" metrics directly into the `BalanceCard` and removed the `MetricsRow` to reclaim space.
+- Upgraded balance typography to a prominent ExtraBold Serif style (42.sp) for better readability.
+- Added a "Return to Today" shortcut icon in the top bar that appears when filtering by day or viewing past months.
+- Simplified the "Ingresos" dialog: focused on adding money, with "Saldo inicial" and manual BCV overrides tucked into a toggleable advanced section.
+- Removed the legacy `conversionBs` field from the model and database to prepare for the upcoming Binance transaction system.
+- App version: `0.4.3.2` (`versionCode=10`). Database moved to schema v5 (destructive migration).
+- All unit tests pass, with coverage for the removed conversion logic and updated balance formulas.
+
+## Planned Phase 5 — Full Binance transaction detail and history
 
 ### Phase 4.4 — Validation and regression checks
 - Add or update tests covering month switching, month creation, and carry-forward calculations.
@@ -182,6 +191,8 @@ Calendar smoke-check checklist:
 The recorded emulator checks are smoke checks, not a committed automated Compose UI test suite. Broader accessibility, screen-size, and lifecycle coverage remains pending. Remaining style migration includes fields, cards, other dialogs, and the expense date picker; carry-forward business rules remain Phase 4.3 work.
 
 ## Verification status
+
+Phase 4.3.2 (`versionName=0.4.3.2`, `versionCode=10`) verified on emulator: confirmed "Ingresos" and "Gastos" integration into the balance card, massive balance font, and functional "Home" shortcut. Verified advanced options toggle in the budget editor.
 
 Phase 4.3.1 (`versionName=0.4.3.1`, `versionCode=9`) verified on emulator: confirmed distinctive header font, "Day - Month" title format, clean exchange rate display, and intuitive Sun/Moon theme icons. Verified the compacted expense dialog fits without immediate scrolling.
 

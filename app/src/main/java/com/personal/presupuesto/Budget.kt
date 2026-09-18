@@ -140,7 +140,6 @@ data class Budget(
     val monthLabel: String,
     val incomeBs: BigDecimal,
     val incomeRate: BigDecimal,
-    val conversionBs: BigDecimal,
     val categories: List<Category>,
     val debts: List<Debt> = emptyList(),
     val monthId: String,
@@ -154,7 +153,7 @@ data class Budget(
     val incomeUsd: BigDecimal get() = convert(incomeBs, incomeRate)
     val cashBs: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
     val cashUsd: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalUsdAt(incomeRate) }
-    val balanceBs: BigDecimal get() = openingBalanceBs + incomeBs - cashBs - conversionBs
+    val balanceBs: BigDecimal get() = openingBalanceBs + incomeBs - cashBs
     // September K6 is unguarded, unlike row conversion formulas. Show unavailable at zero rate.
     val balanceUsd: BigDecimal? get() = if (incomeRate.signum() == 0) null else convert(balanceBs, incomeRate)
 
