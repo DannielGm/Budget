@@ -121,7 +121,11 @@ data class Expense(
     val timestamp: Long = System.currentTimeMillis()
 ) {
     val amountUsd: BigDecimal get() = convert(amountBs, rate)
-    fun amountUsdAt(defaultRate: BigDecimal): BigDecimal = convert(amountBs, if (rate.signum() == 0) defaultRate else rate)
+
+    // Phase 4.3: conversions always use the caller's context rate (the month's first BCV
+    // entry in month view, the picked day's BCV rate in day view). The stored per-row rate
+    // is kept only as a historical record and no longer drives conversions.
+    fun amountUsdAt(contextRate: BigDecimal): BigDecimal = convert(amountBs, contextRate)
 }
 data class Category(val name: String, val cashExpense: Boolean, val rows: List<Expense>) {
     val totalBs: BigDecimal get() = rows.fold(BigDecimal.ZERO) { total, row -> total + row.amountBs }
@@ -139,7 +143,9 @@ data class Budget(
     val conversionBs: BigDecimal,
     val categories: List<Category>,
     val debts: List<Debt> = emptyList(),
-    val monthId: String
+    val monthId: String,
+    // Carried from the previous month's closing balance; editable in the budget editor.
+    val openingBalanceBs: BigDecimal = BigDecimal.ZERO
 ) {
     val creditPurchasesBs: BigDecimal get() = categories.filter { !it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
     val debtBs: BigDecimal get() = debts.fold(creditPurchasesBs) { total, debt -> total + debt.remainingBs }
@@ -148,9 +154,14 @@ data class Budget(
     val incomeUsd: BigDecimal get() = convert(incomeBs, incomeRate)
     val cashBs: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalBs }
     val cashUsd: BigDecimal get() = categories.filter { it.cashExpense }.fold(BigDecimal.ZERO) { a, c -> a + c.totalUsdAt(incomeRate) }
-    val balanceBs: BigDecimal get() = incomeBs - cashBs - conversionBs
+    val balanceBs: BigDecimal get() = openingBalanceBs + incomeBs - cashBs - conversionBs
     // September K6 is unguarded, unlike row conversion formulas. Show unavailable at zero rate.
     val balanceUsd: BigDecimal? get() = if (incomeRate.signum() == 0) null else convert(balanceBs, incomeRate)
+
+    // Context-rate variants: day views divide by the picked day's BCV rate instead of the month's.
+    fun cashUsdAt(rate: BigDecimal): BigDecimal = convert(cashBs, rate)
+    fun debtUsdAt(rate: BigDecimal): BigDecimal? = if (rate.signum() == 0) null else convert(debtBs, rate)
+    fun balanceUsdAt(rate: BigDecimal): BigDecimal? = if (rate.signum() == 0) null else convert(balanceBs, rate)
 
     fun filteredCategories(dateFilter: Long?, rangeDays: Int = 1): List<Category> {
         if (dateFilter == null) return categories

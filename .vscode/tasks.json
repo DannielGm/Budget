@@ -1,0 +1,32 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Verify Budget Test",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d E:\\Projects\\Presupuesto && gradlew.bat :app:testDebugUnitTest --tests com.personal.presupuesto.BudgetTest"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Full Build and Verify",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"set \"JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr\" && set \"ANDROID_HOME=C:\\Users\\DANIE\\AppData\\Local\\Android\\Sdk\" && set \"ANDROID_SDK_ROOT=C:\\Users\\DANIE\\AppData\\Local\\Android\\Sdk\" && cd /d E:\\Projects\\Presupuesto && gradlew.bat clean :app:assembleDebug :app:testDebugUnitTest"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+	]
+}

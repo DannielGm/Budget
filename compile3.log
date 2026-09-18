@@ -1,0 +1,32 @@
+
+> Configure project :app
+WARNING: The option setting 'android.builtInKotlin=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: The option setting 'android.newDsl=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+w: Deprecated 'org.jetbrains.kotlin.android' plugin usage
+The 'org.jetbrains.kotlin.android' plugin in project ':app' is no longer required for Kotlin support since AGP 9.0.
+Solution: Remove both `android.builtInKotlin=true` and `android.newDsl=false` from `gradle.properties`, then migrate to built-in Kotlin.
+See https://kotl.in/gradle/agp-built-in-kotlin for more details.
+
+
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugRFile
+> Task :app:kspDebugKotlin
+
+> Task :app:compileDebugKotlin
+w: file:///E:/Projects/Presupuesto/app/src/main/java/com/personal/presupuesto/MainActivity.kt:112:26 'constructor(p0: String!, p1: String!): Locale' is deprecated. Deprecated in Java.
+
+[Incubating] Problems report is available at: file:///E:/Projects/Presupuesto/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 7s
+7 actionable tasks: 7 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.3.1/userguide/configuration_cache_enabling.html

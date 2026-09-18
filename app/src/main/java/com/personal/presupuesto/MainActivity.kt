@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -66,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -87,6 +89,9 @@ import java.util.Locale
 import java.util.Calendar as JavaCalendar
 import com.personal.presupuesto.data.BudgetDatabase
 import com.personal.presupuesto.data.BudgetRepository
+import com.personal.presupuesto.data.ExchangeRateRepository
+import com.personal.presupuesto.data.HttpExchangeRateHttp
+import com.personal.presupuesto.data.dateIsoOf
 import com.personal.presupuesto.data.MonthSummary
 import com.personal.presupuesto.ui.theme.BudgetTheme
 import com.personal.presupuesto.ui.theme.LocalBudgetColors
@@ -99,6 +104,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Random
 
+private fun parseRateDate(iso: String): Date =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(iso, java.text.ParsePosition(0)) ?: Date()
+
 private fun BigDecimal.display(): String = DecimalFormat(
     "#,##0.00",
     DecimalFormatSymbols(Locale("es", "ES"))
@@ -108,19 +116,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repository = BudgetRepository(BudgetDatabase.create(applicationContext))
+        val database = BudgetDatabase.create(applicationContext)
+        val exchange = ExchangeRateRepository(database, HttpExchangeRateHttp())
+        val repository = BudgetRepository(database, exchange)
         setContent {
             val systemDark = isSystemInDarkTheme()
             var darkTheme by remember { mutableStateOf(systemDark) }
             PresupuestoTheme(darkTheme = darkTheme) {
-                BudgetApp(repository, applicationContext, darkTheme) { darkTheme = !darkTheme }
+                BudgetApp(repository, exchange, applicationContext, darkTheme) { darkTheme = !darkTheme }
             }
         }
     }
 }
 
 @Composable
-private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkTheme: Boolean, onThemeToggle: () -> Unit) {
+private fun BudgetApp(repository: BudgetRepository, exchange: ExchangeRateRepository, context: Context, isDarkTheme: Boolean, onThemeToggle: () -> Unit) {
     var budget by remember { mutableStateOf<Budget?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var editingBudget by remember { mutableStateOf(false) }
@@ -137,6 +147,35 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
     var confirmClearAll by remember { mutableStateOf(false) }
     var confirmClearMonth by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var rateBadge by remember { mutableStateOf<String?>(null) }
+    var rateStale by remember { mutableStateOf(false) }
+    var rateRefreshing by remember { mutableStateOf(false) }
+    var rateVersion by remember { mutableStateOf(0) }
+
+    // BCV rate maintenance: startup runs non-forced (network-free when today is cached);
+    // the badge button forces a full refresh. Failures keep the last known rate marked stale.
+    fun refreshRates(force: Boolean) {
+        if (rateRefreshing) return
+        rateRefreshing = true
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { exchange.ensureFresh(force) } }
+                .onSuccess { snapshot ->
+                    val rate = snapshot.displayedRate
+                    rateBadge = rate?.let { value ->
+                        buildString {
+                            append("Tasa BCV: ${value.display()} Bs/USD")
+                            snapshot.displayedDateIso?.let { date ->
+                                append(" · ${SimpleDateFormat("d MMM", Locale.getDefault()).format(parseRateDate(date))}")
+                            }
+                        }
+                    }
+                    rateStale = rate != null && !snapshot.updatedToday
+                    rateVersion++
+                }
+                .onFailure { rateStale = rateBadge != null }
+            rateRefreshing = false
+        }
+    }
 
     fun persist(updated: Budget) {
         if (saving) return
@@ -162,6 +201,7 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         }.onSuccess { (loaded, stored) ->
             budget = loaded
             months = stored
+            refreshRates(false)
         }
             .onFailure { error = "No se pudo cargar el presupuesto." }
     }
@@ -291,6 +331,20 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
         }
     }
 
+    // Month view converts with the month's BCV rate; a day filter converts with that day's rate.
+        val contextRate by produceState(
+        initialValue = budget?.incomeRate ?: BigDecimal.ZERO,
+        budget?.monthId, budget?.incomeRate, dateFilter, rateVersion
+    ) {
+        val current = budget ?: return@produceState
+        value = if (dateFilter == null) current.incomeRate
+        else {
+            val filter = dateFilter
+            if (filter != null) withContext(Dispatchers.IO) { exchange.dayRate(dateIsoOf(filter), current.incomeRate) }
+            else current.incomeRate
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(LocalBudgetColors.current.background)) {
         when {
             error != null && budget == null -> ErrorState(error!!)
@@ -311,6 +365,11 @@ private fun BudgetApp(repository: BudgetRepository, context: Context, isDarkThem
                     isDarkTheme = isDarkTheme,
                     dateFilter = dateFilter,
                     graphRangeDays = graphRangeDays,
+                    contextRate = contextRate,
+                    rateBadge = rateBadge,
+                    rateStale = rateStale,
+                    rateRefreshing = rateRefreshing,
+                    onRefreshRate = { refreshRates(true) },
                     onThemeToggle = onThemeToggle,
                     onCategorySelect = { selectedCategoryName = it },
                     onDateFilterChange = { dateFilter = it; graphRangeDays = 30 },
@@ -478,6 +537,11 @@ private fun BudgetScreen(
     isDarkTheme: Boolean,
     dateFilter: Long?,
     graphRangeDays: Int,
+    contextRate: BigDecimal,
+    rateBadge: String?,
+    rateStale: Boolean,
+    rateRefreshing: Boolean,
+    onRefreshRate: () -> Unit,
     onThemeToggle: () -> Unit,
     onCategorySelect: (String) -> Unit,
     onDateFilterChange: (Long?) -> Unit,
@@ -549,7 +613,7 @@ private fun BudgetScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            BalanceCard(budget, onEditBudget, onOpenSummary)
+            BalanceCard(budget, onEditBudget, onOpenSummary, contextRate, rateBadge, rateStale, rateRefreshing, onRefreshRate)
             Spacer(Modifier.height(12.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -593,7 +657,7 @@ private fun BudgetScreen(
                 }
             }
             Spacer(Modifier.height(14.dp))
-            DebtCard(budget, onOpenDebtSummary)
+            DebtCard(budget, onOpenDebtSummary, contextRate)
             Spacer(Modifier.height(16.dp))
 
             val filteredCategories = budget.filteredCategories(dateFilter, graphRangeDays)
@@ -639,7 +703,7 @@ private fun BudgetScreen(
                             val animatedCategory = filteredCategories.firstOrNull { it.name == categoryName } ?: selectedCategory
                             CategoryCardContent(
                                 category = animatedCategory,
-                                defaultRate = budget.incomeRate,
+                                defaultRate = contextRate,
                                 onCategoryClick = { showCategoryPicker = true },
                                 onSwipeCategory = { direction ->
                                     if (filteredCategories.isNotEmpty()) {
@@ -709,8 +773,8 @@ private fun BudgetGraph(budget: Budget, modifier: Modifier, dateFilter: Long? = 
     val income = budget.incomeBs
     val conversion = budget.conversionBs
 
-    val dataPoints = remember(expenses, income, conversion) {
-        var currentBalance = income - conversion
+    val dataPoints = remember(expenses, income, conversion, budget.openingBalanceBs) {
+        var currentBalance = budget.openingBalanceBs + income - conversion
         val points = mutableListOf<BigDecimal>()
         points.add(currentBalance)
         expenses.forEach {
@@ -850,7 +914,16 @@ private fun CategoryCardContent(
 }
 
 @Composable
-private fun BalanceCard(budget: Budget, onEdit: () -> Unit, onOpenSummary: () -> Unit) {
+private fun BalanceCard(
+    budget: Budget,
+    onEdit: () -> Unit,
+    onOpenSummary: () -> Unit,
+    contextRate: BigDecimal,
+    rateBadge: String?,
+    rateStale: Boolean,
+    rateRefreshing: Boolean,
+    onRefreshRate: () -> Unit
+) {
     Card(
         Modifier
             .fillMaxWidth()
@@ -858,8 +931,26 @@ private fun BalanceCard(budget: Budget, onEdit: () -> Unit, onOpenSummary: () ->
         containerColor = BudgetTheme.colors.primary.copy(alpha = 0.96f)
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Saldo disponible", color = BudgetTheme.colors.onPrimary.copy(alpha = .82f), style = BudgetTypography.labelLarge)
-            Text("$ ${budget.balanceUsd?.display() ?: BigDecimal.ZERO.display()}", color = BudgetTheme.colors.onPrimary, style = BudgetTypography.headlineLarge, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Saldo disponible", color = BudgetTheme.colors.onPrimary.copy(alpha = .82f), style = BudgetTypography.labelLarge)
+                Spacer(Modifier.weight(1f))
+                rateBadge?.let {
+                    Text(
+                        it + if (rateStale) " (sin actualizar)" else "",
+                        color = BudgetTheme.colors.onPrimary.copy(alpha = .82f),
+                        style = BudgetTypography.labelMedium
+                    )
+                }
+                Spacer(Modifier.size(4.dp))
+                IconButton(onClick = onRefreshRate, enabled = !rateRefreshing) {
+                    if (rateRefreshing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = BudgetTheme.colors.onPrimary)
+                    } else {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Actualizar tasa BCV", tint = BudgetTheme.colors.onPrimary, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            Text("$ ${budget.balanceUsdAt(contextRate)?.display() ?: BigDecimal.ZERO.display()}", color = BudgetTheme.colors.onPrimary, style = BudgetTypography.headlineLarge, fontWeight = FontWeight.Bold)
             Text("Bs ${budget.balanceBs.display()}", color = BudgetTheme.colors.onPrimary.copy(alpha = .9f), style = BudgetTypography.bodyLarge)
             Spacer(Modifier.height(2.dp))
             OutlinedButton(
@@ -891,6 +982,8 @@ private fun BudgetSummaryScreen(budget: Budget, onBack: () -> Unit) {
             MetricCard("Ingresos", "$ ${budget.incomeUsd.display()}", Modifier.fillMaxWidth())
             MetricCard("Gastos", "$ ${budget.cashUsd.display()}", Modifier.fillMaxWidth())
             MetricCard("Conversión", "$ ${convert(budget.conversionBs, budget.incomeRate).display()}", Modifier.fillMaxWidth())
+            MetricCard("Saldo inicial", "$ ${(if (budget.incomeRate.signum() == 0) BigDecimal.ZERO else convert(budget.openingBalanceBs, budget.incomeRate)).display()}  ·  Bs ${budget.openingBalanceBs.display()}", Modifier.fillMaxWidth())
+            MetricCard("Tasa BCV del mes", "${budget.incomeRate.display()} Bs/USD", Modifier.fillMaxWidth())
             MetricCard("Saldo disponible", "$ ${budget.balanceUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
             MetricCard("Deuda total", "$ ${budget.debtUsd?.display() ?: BigDecimal.ZERO.display()}", Modifier.fillMaxWidth())
         }
@@ -987,7 +1080,7 @@ private fun CategoryPickerDialog(
 }
 
 @Composable
-private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit) {
+private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit, contextRate: BigDecimal) {
     Card(
         Modifier
             .fillMaxWidth()
@@ -997,7 +1090,7 @@ private fun DebtCard(budget: Budget, onOpenSummary: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Deuda", style = BudgetTypography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text("$ ${budget.debtUsd?.display() ?: BigDecimal.ZERO.display()}", style = BudgetTypography.titleMedium, color = BudgetTheme.colors.secondary, fontWeight = FontWeight.Bold)
+                Text("$ ${budget.debtUsdAt(contextRate)?.display() ?: BigDecimal.ZERO.display()}", style = BudgetTypography.titleMedium, color = BudgetTheme.colors.secondary, fontWeight = FontWeight.Bold)
             }
             Text("Toca para ver el detalle", style = BudgetTypography.bodySmall, color = BudgetTheme.colors.onSurfaceVariant)
         }
@@ -1054,7 +1147,7 @@ private fun DebtSummaryScreen(
 @Composable
 private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (Budget) -> Unit) {
     var income by remember { mutableStateOf("") }
-    var rate by remember { mutableStateOf(budget.incomeRate.toPlainString()) }
+    var opening by remember { mutableStateOf(budget.openingBalanceBs.toPlainString()) }
     var conversion by remember { mutableStateOf(budget.conversionBs.toPlainString()) }
     var isAdditive by remember { mutableStateOf(false) }
     var invalid by remember { mutableStateOf(false) }
@@ -1066,8 +1159,14 @@ private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (B
                 Checkbox(checked = isAdditive, onCheckedChange = { isAdditive = it })
                 Text("Sumar al ingreso actual (Bs ${budget.incomeBs.display()})", style = BudgetTypography.bodyMedium)
             }
-            MoneyField("Tasa del ingreso", rate) { rate = it }
             MoneyField("Conversión en Bs", conversion) { conversion = it }
+            // Phase 4.3: the BCV rate is managed automatically and is no longer editable.
+            Text(
+                "Tasa BCV del mes: ${budget.incomeRate.display()} Bs/USD (automática)",
+                style = BudgetTypography.bodyMedium,
+                color = BudgetTheme.colors.onSurfaceVariant
+            )
+            MoneyField("Saldo inicial arrastrado en Bs", opening) { opening = it }
             if (invalid) Text("Usa números válidos y valores no negativos.", color = BudgetTheme.colors.error)
         }
     }, confirmButton = {
@@ -1075,12 +1174,12 @@ private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (B
             TextButton(onClick = onDismiss) { Text("Cancelar") }
             Button(onClick = {
                 val parsedIncome = income.toBigDecimalOrNull() ?: if (isAdditive) BigDecimal.ZERO else budget.incomeBs
-                val parsedRate = rate.toBigDecimalOrNull()
+                val parsedOpening = opening.toBigDecimalOrNull()
                 val parsedConversion = conversion.toBigDecimalOrNull()
 
-                if (parsedRate != null && parsedConversion != null && parsedRate.signum() >= 0 && parsedConversion.signum() >= 0 && parsedIncome.signum() >= 0) {
+                if (parsedOpening != null && parsedConversion != null && parsedConversion.signum() >= 0 && parsedIncome.signum() >= 0) {
                     val finalIncome = if (isAdditive) budget.incomeBs + parsedIncome else parsedIncome
-                    onSave(budget.copy(incomeBs = finalIncome, incomeRate = parsedRate, conversionBs = parsedConversion))
+                    onSave(budget.copy(incomeBs = finalIncome, conversionBs = parsedConversion, openingBalanceBs = parsedOpening))
                 } else invalid = true
             }) { Text("Guardar") }
         }
@@ -1091,7 +1190,6 @@ private fun BudgetEditorDialog(budget: Budget, onDismiss: () -> Unit, onSave: (B
 private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: () -> Unit, onSave: (Expense) -> Unit) {
     var label by remember { mutableStateOf(expense?.label.orEmpty()) }
     var amount by remember { mutableStateOf(expense?.amountBs?.toPlainString().orEmpty()) }
-    var rate by remember { mutableStateOf(expense?.rate?.toPlainString().orEmpty()) }
     var timestamp by remember { mutableStateOf(expense?.timestamp ?: System.currentTimeMillis()) }
     var timestampText by remember {
         mutableStateOf(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp)))
@@ -1128,7 +1226,11 @@ private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: 
             Text(category, style = BudgetTypography.labelLarge, color = BudgetTheme.colors.primary)
             OutlinedTextField(label = { Text("Descripción") }, value = label, onValueChange = { label = it }, singleLine = true)
             MoneyField("Monto en Bs", amount) { amount = it }
-            MoneyField("Tasa", rate) { rate = it }
+            Text(
+                "La conversión usa la tasa BCV del mes o del día elegido",
+                style = BudgetTypography.bodyMedium,
+                color = BudgetTheme.colors.onSurfaceVariant
+            )
             Text("Fecha de creación: ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))}")
             OutlinedTextField(
                 value = timestampText,
@@ -1146,9 +1248,11 @@ private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: 
             TextButton(onClick = onDismiss) { Text("Cancelar") }
             Button(onClick = {
                 val parsedAmount = amount.toBigDecimalOrNull()
-                val parsedRate = rate.toBigDecimalOrNull()
                 val parsedTimestamp = parseExpenseTimestamp(timestampText)
-                if (label.isNotBlank() && parsedAmount != null && parsedRate != null && parsedAmount.signum() >= 0 && parsedRate.signum() >= 0 && parsedTimestamp != null && isPastOrPresentTimestamp(parsedTimestamp)) onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, parsedRate, parsedTimestamp)) else invalid = true
+                // Phase 4.3: conversions follow the BCV context rate; new rows store rate 0.
+                if (label.isNotBlank() && parsedAmount != null && parsedAmount.signum() >= 0 && parsedTimestamp != null && isPastOrPresentTimestamp(parsedTimestamp)) {
+                    onSave(Expense(expense?.id ?: UUID.randomUUID().toString(), label.trim(), parsedAmount, expense?.rate ?: BigDecimal.ZERO, parsedTimestamp))
+                } else invalid = true
             }) { Text("Guardar") }
         }
     })

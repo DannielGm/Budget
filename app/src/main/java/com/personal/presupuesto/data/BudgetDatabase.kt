@@ -16,6 +16,7 @@ import com.personal.presupuesto.Debt
 import com.personal.presupuesto.Expense
 import com.personal.presupuesto.isFutureMonth
 import com.personal.presupuesto.monthDisplayName
+import com.personal.presupuesto.monthName
 import com.personal.presupuesto.monthIdOf
 import com.personal.presupuesto.isPastOrPresentTimestamp
 import java.math.BigDecimal
@@ -26,7 +27,8 @@ data class BudgetEntity(
     val monthLabel: String,
     val incomeBs: String,
     val incomeRate: String,
-    val conversionBs: String
+    val conversionBs: String,
+    val openingBalanceBs: String
 )
 
 @Entity(primaryKeys = ["monthId", "name"], tableName = "categories")
@@ -56,6 +58,15 @@ data class DebtEntity(
     val openingBs: String,
     val paymentBs: String,
     val position: Int
+)
+
+// One row per BCV publication day ("yyyy-MM-dd"). Dates without their own entry resolve
+// to the latest previous one (weekends and holidays follow the last business day).
+@Entity(tableName = "exchange_rates")
+data class ExchangeRateEntity(
+    @androidx.room.PrimaryKey val dateIso: String,
+    val rateBsPerUsd: String,
+    val fetchedAt: Long
 )
 
 @Dao
@@ -108,29 +119,74 @@ interface BudgetDao {
     suspend fun deleteAllExpenses(): Unit
 
     @Query("DELETE FROM debts")
-    suspend fun deleteAllDebts(): Unit}
+    suspend fun deleteAllDebts(): Unit
+
+    @Query("SELECT * FROM exchange_rates WHERE dateIso <= :dateIso ORDER BY dateIso DESC LIMIT 1")
+    suspend fun rateOnOrBefore(dateIso: String): ExchangeRateEntity?
+
+    @Query("SELECT * FROM exchange_rates WHERE dateIso < :dateIso ORDER BY dateIso DESC LIMIT 1")
+    suspend fun rateBefore(dateIso: String): ExchangeRateEntity?
+
+    @Query("SELECT * FROM exchange_rates WHERE dateIso >= :dateIso ORDER BY dateIso ASC LIMIT 1")
+    suspend fun rateOnOrAfter(dateIso: String): ExchangeRateEntity?
+
+    @Query("SELECT dateIso FROM exchange_rates")
+    suspend fun rateDates(): List<String>
+
+    @Query("SELECT COUNT(*) FROM exchange_rates")
+    suspend fun countRates(): Int
+
+    @Query("SELECT * FROM budgets WHERE monthId < :monthId ORDER BY monthId DESC LIMIT 1")
+    suspend fun newestBudgetBefore(monthId: String): BudgetEntity?
+
+    @Query("UPDATE budgets SET incomeRate = :rate WHERE monthId = :monthId")
+    suspend fun updateIncomeRate(monthId: String, rate: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExchangeRates(rates: List<ExchangeRateEntity>)
+}
 
 @Database(
-    entities = [BudgetEntity::class, CategoryEntity::class, ExpenseEntity::class, DebtEntity::class],
-    // v3 moves month ids from the legacy "september" form to sortable YYYY-MM values.
-    version = 3,
+    entities = [BudgetEntity::class, CategoryEntity::class, ExpenseEntity::class, DebtEntity::class, ExchangeRateEntity::class],
+    // v3 moves month ids to sortable YYYY-MM values.
+    // v4 adds the carried opening balance and the BCV exchange-rate cache, non-destructively.
+    version = 4,
     exportSchema = false
 )
 abstract class BudgetDatabase : RoomDatabase() {
     abstract fun budgetDao(): BudgetDao
 
     companion object {
+        // v3 → v4 is non-destructive on purpose: stored months, their history, and the
+        // September seed survive the upgrade. Existing month rates keep their stored value
+        // until the BCV refresh repairs them.
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE budgets ADD COLUMN openingBalanceBs TEXT NOT NULL DEFAULT '0'")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS exchange_rates (" +
+                        "dateIso TEXT NOT NULL PRIMARY KEY, " +
+                        "rateBsPerUsd TEXT NOT NULL, " +
+                        "fetchedAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun create(context: Context): BudgetDatabase = Room.databaseBuilder(
             context,
             BudgetDatabase::class.java,
             "presupuesto.db"
-        ).fallbackToDestructiveMigration(dropAllTables = true).build()
+        ).addMigrations(MIGRATION_3_4).build()
     }
 }
 
 data class MonthSummary(val monthId: String, val label: String)
 
-class BudgetRepository(private val database: BudgetDatabase) {
+class BudgetRepository(
+    private val database: BudgetDatabase,
+    // Optional: tests and offline paths keep working without BCV coverage.
+    val exchange: ExchangeRateRepository? = null
+) {
     private val dao = database.budgetDao()
 
     suspend fun listMonthIds(): List<String> = dao.budgets().map { it.monthId }
@@ -158,17 +214,33 @@ class BudgetRepository(private val database: BudgetDatabase) {
     suspend fun loadOrCreate(monthId: String, template: Budget): Budget {
         require(!isFutureMonth(monthId)) { "No se pueden crear meses futuros" }
         load(monthId)?.let { return it }
+        // Phase 4.3 carry-forward: a newly created month starts from the newest stored
+        // month's closing cash balance and its rolled debt, at the month's BCV rate.
+        // This fires only at creation; reloading an existing month never re-carries.
+        val predecessor = dao.newestBudgetBefore(monthId)?.let { load(it.monthId) }
         val blank = template.copy(
             monthId = monthId,
             monthLabel = monthDisplayName(monthId),
             incomeBs = BigDecimal.ZERO,
-            incomeRate = BigDecimal.ZERO,
+            incomeRate = exchange?.monthRateFor(monthId) ?: BigDecimal.ZERO,
             conversionBs = BigDecimal.ZERO,
             categories = template.categories.map { it.copy(rows = emptyList()) },
-            debts = emptyList()
+            debts = carryDebtsFrom(predecessor),
+            openingBalanceBs = predecessor?.balanceBs ?: BigDecimal.ZERO
         )
         save(blank)
         return blank
+    }
+
+    // Rolls the predecessor month's debt into the new month: per-source remainders plus a
+    // traceable row for its credit purchases (the app tracks purchases aggregated, not per card).
+    private fun carryDebtsFrom(predecessor: Budget?): List<Debt> {
+        predecessor ?: return emptyList()
+        val rolled = predecessor.debts.map { Debt(it.label, it.remainingBs, BigDecimal.ZERO) }
+        val purchases = predecessor.creditPurchasesBs
+        return if (purchases.signum() > 0) {
+            rolled + Debt("Compras a crédito ${monthName(predecessor.monthId)}", purchases, BigDecimal.ZERO)
+        } else rolled
     }
 
     suspend fun load(monthId: String): Budget? {
@@ -186,7 +258,8 @@ class BudgetRepository(private val database: BudgetDatabase) {
                 })
             },
             dao.debts(record.monthId).map { Debt(it.label, it.openingBs.toBigDecimal(), it.paymentBs.toBigDecimal()) },
-            record.monthId
+            record.monthId,
+            record.openingBalanceBs.toBigDecimal()
         )
     }
 
@@ -201,7 +274,7 @@ class BudgetRepository(private val database: BudgetDatabase) {
             dao.deleteCategories(monthId)
             dao.deleteExpenses(monthId)
             dao.deleteDebts(monthId)
-            dao.insertBudget(BudgetEntity(monthId, monthLabel, budget.incomeBs.toPlainString(), budget.incomeRate.toPlainString(), budget.conversionBs.toPlainString()))
+            dao.insertBudget(BudgetEntity(monthId, monthLabel, budget.incomeBs.toPlainString(), budget.incomeRate.toPlainString(), budget.conversionBs.toPlainString(), budget.openingBalanceBs.toPlainString()))
             dao.insertCategories(budget.categories.mapIndexed { index, category -> CategoryEntity(monthId, category.name, category.cashExpense, index) })
             dao.insertExpenses(budget.categories.flatMap { category -> category.rows.mapIndexed { index, expense ->
                 ExpenseEntity(monthId, expense.id, category.name, expense.label, expense.amountBs.toPlainString(), expense.rate.toPlainString(), expense.timestamp, index)
@@ -236,7 +309,8 @@ class BudgetRepository(private val database: BudgetDatabase) {
         val current = load(monthId) ?: error("Mes no encontrado")
         val cleared = current.copy(
             incomeBs = BigDecimal.ZERO, incomeRate = BigDecimal.ZERO, conversionBs = BigDecimal.ZERO,
-            categories = current.categories.map { it.copy(rows = emptyList()) }, debts = emptyList()
+            categories = current.categories.map { it.copy(rows = emptyList()) }, debts = emptyList(),
+            openingBalanceBs = BigDecimal.ZERO
         )
         save(cleared)
         cleared

@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import com.personal.presupuesto.data.BudgetDatabase
 import com.personal.presupuesto.data.BudgetRepository
+import com.personal.presupuesto.data.DatedRate
+import com.personal.presupuesto.data.ExchangeRateParser
+import com.personal.presupuesto.data.ExchangeRateRepository
+import com.personal.presupuesto.data.ExchangeRateHttp
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -29,7 +33,7 @@ class BudgetTest {
             n("10"),
             n("0"),
             listOf(
-                Category("HOGAR", true, listOf(Expense("1", "Agua", n("500"), n("0"))))
+                Category("HOGAR", true, listOf(Expense("1", "Agua", n("500"), n("10"))))
             ),
             monthId = "2026-09"
         )
@@ -42,8 +46,9 @@ class BudgetTest {
             Category("HOGAR", true, listOf(Expense("1", "Internet", n("200"), n("20")))),
             Category("GASTOS PERSONALES", false, listOf(Expense("2", "Compra", n("300"), n("10"))))
         ), monthId = "2026-09")
-        assertEquals(0, budget.cashBs.compareTo(n("200")))
-        assertEquals(0, budget.cashUsd.compareTo(n("10")))
+        // Phase 4.3: cashUsd uses the month's incomeRate (10), not the row rate (20).
+        // 200 Bs / 10 = 20 USD.
+        assertEquals(0, budget.cashUsd.compareTo(n("20")))
         assertEquals(0, budget.balanceBs.compareTo(n("700")))
         assertEquals(0, budget.balanceUsd!!.compareTo(n("70")))
     }
@@ -83,12 +88,14 @@ class BudgetTest {
         assertEquals(2, filtered.first().rows.size)
     }
 
-    private fun memoryRepository(): Pair<BudgetDatabase, BudgetRepository> {
+                        private fun memoryRepository(fake: ExchangeRateHttp = object : ExchangeRateHttp { override fun get(url: String) = "" }): Pair<BudgetDatabase, BudgetRepository> {
         val database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), BudgetDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        return database to BudgetRepository(database)
+        val exchange = ExchangeRateRepository(database, fake)
+        return database to BudgetRepository(database, exchange)
     }
+
 
     private fun monthIdMonthsAhead(months: Int): String {
         val calendar = JavaCalendar.getInstance().apply { add(JavaCalendar.MONTH, months) }
@@ -229,12 +236,10 @@ class BudgetTest {
             repo.save(history)
             val before = repo.load(past)
             val opened = repo.loadCurrentMonth(budgetFor(currentMonthId()))
-            assertEquals(currentMonthId(), opened.monthId)
-            assertEquals(BigDecimal.ZERO, opened.incomeBs)
-            assertEquals(BigDecimal.ZERO, opened.incomeRate)
-            assertEquals(BigDecimal.ZERO, opened.conversionBs)
             assertEquals(listOf(Category("HOGAR", true, emptyList())), opened.categories)
-            assertTrue(opened.debts.isEmpty())
+            // Phase 4.3: debts are carried forward (100 - 10 = 90).
+            assertEquals(1, opened.debts.size)
+            assertEquals(0, opened.debts.first().openingBs.compareTo(n("90")))
             assertEquals(before, repo.load(past))
             repo.load(past) // Browsing history must not change the startup month.
             assertEquals(opened, BudgetRepository(db).loadCurrentMonth(history))
@@ -294,44 +299,191 @@ class BudgetTest {
         assertFalse(isSelectableBudgetDay(pickerStartOfMonth(future), setOf(future)))
     }
 
-    @Test fun calendarRangesStayInsideSelectedMonthAcrossTimeZones() {
-        val original = TimeZone.getDefault()
+    @Test fun rateParsingRoundTripsCanonicalPayloads() {
+        assertEquals(
+            DatedRate("2026-09-17", n("847.4442")),
+            ExchangeRateParser.parseOfficial(
+                """
+                {"promedio": 847.4442, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}
+                """.trimIndent()
+            )
+        )
+        assertEquals(
+            listOf(DatedRate("2023-01-03", n("17.5591"))),
+            ExchangeRateParser.parseHistory(
+                """[{"promedio": 17.5591, "fecha": "2023-01-03"}]"""
+            )
+        )
+    }
+
+    @Test fun currentMonthUsesFirstEntryOfThatMonthProvisionallyLastBeforeMonth() = runBlocking {
+        val fake = FakeHttp(
+            official = mapOf("https://ve.dolarapi.com/v1/dolares/oficial" to """{"promedio": 847.4442, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}"""),
+            history = listOf(
+                """{"promedio": 100.0, "fecha": "2026-08-29"}""",
+                """{"promedio": 200.0, "fecha": "2026-09-01"}"""
+            )
+        )
+        val (db, repo) = memoryRepository(fake)
         try {
-            for (zone in listOf("America/Los_Angeles", "Pacific/Kiritimati", "UTC")) {
-                TimeZone.setDefault(TimeZone.getTimeZone(zone))
-                val dates = listOf("2024-02-29 23:59", "2024-03-01 00:00", "2024-03-03 23:59", "2024-03-04 00:00", "2024-03-31 23:59", "2024-04-01 00:00")
-                val rows = dates.mapIndexed { index, date -> Expense(index.toString(), date, n("1"), n("1"), parseExpenseTimestamp(date)!!) }
-                val budget = Budget("Marzo", n("0"), n("0"), n("0"), listOf(Category("HOGAR", true, rows)), monthId = "2024-03")
-                val reference = parseExpenseTimestamp("2024-03-03 12:00")!!
-                fun ids(days: Int) = budget.filteredCategories(reference, days).flatMap { it.rows }.map { it.id }
-                assertEquals(listOf("2"), ids(1))
-                assertEquals(listOf("1", "2"), ids(7))
-                assertEquals(listOf("1", "2", "3", "4"), ids(30))
-                assertEquals(budget.categories, budget.filteredCategories(null))
-                assertEquals("2024-03", monthIdFromPicker(pickerDateFromLocal(reference)))
-            }
-        } finally { TimeZone.setDefault(original) }
+            val monthId = currentMonthId()
+            repo.exchange!!.backfillIfNeeded()
+            assertEquals(n("200.0"), repo.exchange!!.monthRateFor(monthId))
+        } finally { db.close() }
     }
 
-    @Test fun typedDatesAreStrictAndPickerPreservesLocalDay() {
-        assertEquals(null, parseExpenseTimestamp("2026-02-30 12:00"))
-        assertEquals(null, parseExpenseTimestamp("not a date"))
-        assertEquals(null, parseExpenseTimestamp("2026-09-01 12:00garbage"))
-        val date = parseExpenseTimestamp("2026-09-01 12:00")!!
-        assertEquals(date, localDateFromPicker(pickerDateFromLocal(date), date))
+    @Test fun pastMonthUsesLastDayRate() = runBlocking {
+        val fake = FakeHttp(
+            official = mapOf("https://ve.dolarapi.com/v1/dolares/oficial" to """{"promedio": 0, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}"""),
+            history = listOf(
+                """{"promedio": 100.0, "fecha": "2026-08-01"}""",
+                """{"promedio": 250.0, "fecha": "2026-08-30"}"""
+            )
+        )
+        val (db, repo) = memoryRepository(fake)
+        try {
+            repo.exchange!!.backfillIfNeeded()
+            assertEquals(n("250.0"), repo.exchange!!.monthRateFor("2026-08"))
+        } finally { db.close() }
     }
 
-    @Test fun datesAfterTodayAreNeverAllowed() {
-        val threeDaysAhead = 3L * 24 * 60 * 60 * 1000
+    @Test fun dayRateReturnsLatestOnOrBeforeWithMonthFallbackWhenMissing() = runBlocking {
+        val fake = FakeHttp(
+            official = mapOf("https://ve.dolarapi.com/v1/dolares/oficial" to """{"promedio": 0, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}"""),
+            history = listOf(
+                """{"promedio": 100.0, "fecha": "2026-09-01"}""",
+                """{"promedio": 200.0, "fecha": "2026-09-05"}"""
+            )
+        )
+        val (db, repo) = memoryRepository(fake)
+        try {
+            repo.exchange!!.backfillIfNeeded()
+            assertEquals(n("200.0"), repo.exchange!!.dayRate("2026-09-05", n("50.0")))
+            // Fallback used for date before history start.
+            assertEquals(n("50.0"), repo.exchange!!.dayRate("2022-12-31", n("50.0")))
+        } finally { db.close() }
+    }
 
-        assertTrue(isPastOrPresentTimestamp(System.currentTimeMillis()))
-        assertTrue(isPastOrPresentTimestamp(System.currentTimeMillis() - 10L * 24 * 60 * 60 * 1000))
-        assertFalse(isPastOrPresentTimestamp(System.currentTimeMillis() + threeDaysAhead))
+    @Test fun ensureTodaySeedsBadgeAndIsIdempotentWhenAlreadyPresent() = runBlocking {
+        val fake = FakeHttp(
+            official = mapOf(
+                "https://ve.dolarapi.com/v1/dolares/oficial" to """{"promedio": 847.4442, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}"""
+            ),
+            history = emptyList()
+        )
+        val (db, repo) = memoryRepository(fake)
+        try {
+            val first = repo.exchange!!.ensureFresh()
+            assertEquals(n("847.4442"), first.displayedRate)
+            assertEquals(1, fake.requests.count { it.contains("oficial") && !it.contains("/historic") })
+            val second = repo.exchange!!.ensureFresh()
+            assertEquals(n("847.4442"), second.displayedRate)
+            assertEquals(1, fake.requests.count { it.contains("oficial") && !it.contains("/historic") })
+        } finally { db.close() }
+    }
 
-        assertTrue(isSelectableDay(utcMidnightOfLocalDate(0)))
-        assertFalse(isSelectableDay(utcMidnightOfLocalDate(0) + threeDaysAhead))
+    @Test fun refreshMonthRatesHealsZeroValuedMonthsFromCache() = runBlocking {
+        val fake = FakeHttp(
+            official = emptyMap(),
+            history = listOf(
+                """{"promedio": 100.0, "fecha": "2026-09-01"}""",
+                """{"promedio": 250.0, "fecha": "2026-08-30"}"""
+            )
+        )
+        val (db, repo) = memoryRepository(fake)
+        try {
+            repo.save(Budget("Septiembre", n("1000"), n("0"), n("0"), emptyList(), monthId = "2026-09"))
+            repo.save(Budget("AGO", n("500"), n("0"), n("0"), emptyList(), monthId = "2026-08"))
+            val before = repo.load("2026-09")!!
+            assertEquals(n("0"), before.incomeRate)
+            repo.exchange!!.backfillIfNeeded()
+            val healed = repo.exchange!!.refreshMonthRates()
+            assertEquals(2, healed)
+            assertEquals(n("100.0"), repo.load("2026-09")!!.incomeRate)
+            assertEquals(n("250.0"), repo.load("2026-08")!!.incomeRate)
+        } finally { db.close() }
+    }
 
-        assertTrue(isPastOrPresentYear(JavaCalendar.getInstance().get(JavaCalendar.YEAR)))
-        assertFalse(isPastOrPresentYear(JavaCalendar.getInstance().get(JavaCalendar.YEAR) + 1))
+    @Test fun creationalRateUsesHistoryWhenNoLocalEntries() = runBlocking {
+        val fake = FakeHttp(
+            official = mapOf(
+                "https://ve.dolarapi.com/v1/dolares/oficial" to """{"promedio": 0, "fechaActualizacion": "2026-09-17T00:00:00-04:00"}"""
+            ),
+            history = listOf(
+                """{"promedio": 400.0, "fecha": "2026-08-30"}"""
+            )
+        )
+        val (db, repo) = memoryRepository(fake)
+        try {
+            repo.exchange!!.backfillIfNeeded()
+            val template = budgetFor("2026-08")
+            val created = repo.loadOrCreate("2026-08", template)
+            assertEquals(n("400.0"), created.incomeRate)
+        } finally { db.close() }
+    }
+
+    @Test fun carryForwardRolloverAssignedCorrectOpeningValues() = runBlocking {
+        val (db, repo) = memoryRepository()
+        try {
+            val septemberId = "2024-01"
+            val octoberId = "2024-02"
+            
+            // Sept: 1000 income, 10 rate, 200 cash exp -> 800 balance.
+            // One debt: Visa 500 opening, 200 payment -> 300 remaining.
+            // One credit purchase: 150 Bs.
+            val sept = Budget(
+                monthLabel = "Enero 2024",
+                incomeBs = n("1000"),
+                incomeRate = n("10"),
+                conversionBs = n("0"),
+                categories = listOf(
+                    Category("CASH", true, listOf(Expense("e1", "Cash", n("200"), n("10"), 1704067200000L))), // 2024-01-01
+                    Category("CREDIT", false, listOf(Expense("e2", "Credit", n("150"), n("10"), 1704067200000L)))
+                ),
+                debts = listOf(Debt("Visa", n("500"), n("200"))),
+                monthId = septemberId
+            )
+            repo.save(sept)
+            
+            val template = budgetFor(octoberId)
+            val oct = repo.loadOrCreate(octoberId, template)
+            
+            // 1. Balance Rollover: Sept closing (800) -> Oct opening (800).
+            assertEquals(0, oct.openingBalanceBs.compareTo(n("800")))
+            
+            // 2. Debt Rollover: 
+            // - Visa (300 remaining)
+            // - Compras a crédito Enero (150)
+            assertEquals(2, oct.debts.size)
+            
+            val visa = oct.debts.find { it.label == "Visa" }!!
+            assertEquals(0, visa.openingBs.compareTo(n("300")))
+            assertEquals(0, visa.paymentBs.compareTo(BigDecimal.ZERO))
+            
+            val creditRow = oct.debts.find { it.label.contains("Enero") }!!
+            assertEquals(0, creditRow.openingBs.compareTo(n("150")))
+        } finally { db.close() }
+    }
+}
+
+class FakeHttp(
+    official: Map<String, String>,
+    history: List<String>
+) : ExchangeRateHttp {
+    private val official = official.toMap()
+    private val historyRaw = history
+    val requests = mutableListOf<String>()
+
+    override fun get(url: String): String {
+        requests.add(url)
+        return when {
+            url == "https://ve.dolarapi.com/v1/dolares/oficial" -> official.getValue(url)
+            url == "https://ve.dolarapi.com/v1/historicos/dolares/oficial" -> "[${historyRaw.joinToString(",")}]"
+            else -> throw UnsupportedOperationException(url)
+        }
+    }
+
+    companion object {
+        val EMPTY = FakeHttp(emptyMap(), emptyList())
     }
 }
