@@ -115,12 +115,16 @@ Room stores each month in the app's private database. This is persistence, not e
 - Behavior preserved: dialogs still dismiss via scrim tap and back press, the calendar still focuses its heading on open so the keyboard stays hidden until the year field is tapped, and all flows and wording are unchanged. No database schema change or data reset.
 - App version: `0.4.2.6` (`versionCode=7`). All 19 unit tests pass, and the APK was installed and launched on the emulator: the main screen rendered through the new components (top bar with month and actions, balance card, flow chips, debt card, category card) with no runtime errors.
 
-## Planned Phase 4 — Multi-month budget model
+### Phase 4.3 — Carry-forward and BCV automation
+- Implemented opening-balance and debt carry-forward rules: new months now inherit the closing state of their predecessor.
+- Automated BCV exchange rate fetching from dolarapi.com with local caching and self-healing month repairs.
+- Redesigned the budget graph with a grid, chronological axis labels, and range filters (1d, 7d, Month).
+- Moved the "Add Expense" action to category headers and added a Light/Dark theme toggle to the top bar.
+- Implemented interactive debt management and detailed expense editing with a custom date/time picker.
+- App version: `0.4.3.0` (`versionCode=8`). Database moved to schema v4 (non-destructive migration).
+- All 24 unit tests pass, covering carry-forward rules, rate fallbacks, and multi-month consistency.
 
-### Phase 4.3 — Carry-forward logic
-- Define how balances, debt, and recurring values pass from one month to the next.
-- Implement the opening-balance and debt carry-forward rules in the budget model.
-- Make sure any new-month calculations remain consistent with the workbook logic already implemented.
+## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.4 — Validation and regression checks
 - Add or update tests covering month switching, month creation, and carry-forward calculations.
@@ -169,6 +173,8 @@ Calendar smoke-check checklist:
 The recorded emulator checks are smoke checks, not a committed automated Compose UI test suite. Broader accessibility, screen-size, and lifecycle coverage remains pending. Remaining style migration includes fields, cards, other dialogs, and the expense date picker; carry-forward business rules remain Phase 4.3 work.
 
 ## Verification status
+
+Phase 4.3 (`versionName=0.4.3.0`, `versionCode=8`) passed `:app:testDebugUnitTest :app:assembleDebug` on 2026-09-17 with 24 tests, zero failures or errors. Verified carry-forward of Bs 800 balance and traceble debt from January to February in unit tests. On the emulator, confirmed the "Tasa BCV" badge updates, the theme toggle works, and the graph grid renders correctly. Used "Llenar datos de prueba" to verify multi-day tracking stability.
 
 Phase 4.2.5 (`versionName=0.4.2.5`, `versionCode=6`) passed `:app:testDebugUnitTest :app:assembleDebug` on 2026-09-17 with 19 tests, zero failures or errors. On `emulator-5554` (API 37) the APK installed and cold-launched, and a scripted acceptance passed all assertions: calendar opens from the month label; tapping a valid day updates the active day; tapping a future day is ignored; "Ver día" closes the dialog and the day filter is restored on reopen; "Ver mes" closes the dialog; browsing to empty August and confirming opens it; navigating forward and confirming restores September. Crash-buffer entries inspected belong to the emulator UWB service, not the app. No emulator data was cleared.
 
