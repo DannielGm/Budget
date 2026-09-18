@@ -41,10 +41,12 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.WbSunny
 import com.personal.presupuesto.ui.theme.BudgetButton as Button
 import com.personal.presupuesto.ui.theme.BudgetCalendar
 import com.personal.presupuesto.ui.theme.BudgetCard as Card
@@ -104,8 +106,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Random
 
-private fun parseRateDate(iso: String): Date =
-    SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(iso, java.text.ParsePosition(0)) ?: Date()
 
 private fun BigDecimal.display(): String = DecimalFormat(
     "#,##0.00",
@@ -161,14 +161,7 @@ private fun BudgetApp(repository: BudgetRepository, exchange: ExchangeRateReposi
             runCatching { withContext(Dispatchers.IO) { exchange.ensureFresh(force) } }
                 .onSuccess { snapshot ->
                     val rate = snapshot.displayedRate
-                    rateBadge = rate?.let { value ->
-                        buildString {
-                            append("Tasa BCV: ${value.display()} Bs/USD")
-                            snapshot.displayedDateIso?.let { date ->
-                                append(" · ${SimpleDateFormat("d MMM", Locale.getDefault()).format(parseRateDate(date))}")
-                            }
-                        }
-                    }
+                    rateBadge = rate?.let { "${it.display()} Bs/USD" }
                     rateStale = rate != null && !snapshot.updatedToday
                     rateVersion++
                 }
@@ -570,12 +563,22 @@ private fun BudgetScreen(
                 Box {
                     var showMonthPicker by remember { mutableStateOf(false) }
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.Bottom,
                         modifier = Modifier.clickable(enabled = !saving) { showMonthPicker = true }
                     ) {
-                        Text(monthDisplayName(budget.monthId), fontWeight = FontWeight.Bold, color = Color.White)
-                        Spacer(Modifier.size(4.dp))
-                        Icon(Icons.Default.DateRange, contentDescription = "Cambiar mes", tint = Color.White)
+                        Text(
+                            text = if (dateFilter == null) monthDisplayName(budget.monthId)
+                            else "${SimpleDateFormat("d", Locale.getDefault()).format(Date(dateFilter))} - ${monthName(budget.monthId)}",
+                            style = BudgetTypography.brandHeadline,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Icon(
+                            Icons.Default.DateRange,
+                            contentDescription = "Cambiar mes",
+                            tint = Color.White,
+                            modifier = Modifier.padding(bottom = 4.dp).size(20.dp)
+                        )
                     }
                     if (showMonthPicker) {
                         BudgetMonthPicker(
@@ -593,7 +596,11 @@ private fun BudgetScreen(
             actions = {
                 if (saving) CircularProgressIndicator(Modifier.size(24.dp).padding(4.dp), color = Color.White)
                 IconButton(onClick = onThemeToggle) {
-                    Icon(if (isDarkTheme) Icons.Default.Star else Icons.Default.Settings, "Toggle Theme", tint = Color.White)
+                    Icon(
+                        if (isDarkTheme) Icons.Default.WbSunny else Icons.Default.NightsStay,
+                        "Toggle Theme",
+                        tint = Color.White
+                    )
                 }
                 IconButton(onClick = onEditBudget) { Icon(Icons.Default.Edit, "Editar presupuesto", tint = Color.White) }
                 IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "Más opciones", tint = Color.White) }
@@ -646,11 +653,24 @@ private fun BudgetScreen(
                             TextButton(onClick = { onDateFilterChange(null) }) { Text("Ver mes") }
                         }
                     }
+                    var showCalendarOnGraph by remember { mutableStateOf(false) }
+                    if (showCalendarOnGraph) {
+                        BudgetMonthPicker(
+                            monthId = budget.monthId,
+                            activeDay = dateFilter,
+                            onDismiss = { showCalendarOnGraph = false },
+                            onSelect = { month, day ->
+                                showCalendarOnGraph = false
+                                if (day != null) onDateFilterChange(day)
+                            }
+                        )
+                    }
                     BudgetGraph(
                         budget = budget,
                         modifier = Modifier
                             .height(168.dp)
-                            .fillMaxWidth(),
+                            .fillMaxWidth()
+                            .clickable { showCalendarOnGraph = true },
                         dateFilter = dateFilter,
                         rangeDays = graphRangeDays
                     )
@@ -1222,26 +1242,33 @@ private fun ExpenseEditorDialog(category: String, expense: Expense?, onDismiss: 
     }
 
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (expense == null) "Nuevo gasto" else "Editar gasto") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(category, style = BudgetTypography.labelLarge, color = BudgetTheme.colors.primary)
             OutlinedTextField(label = { Text("Descripción") }, value = label, onValueChange = { label = it }, singleLine = true)
             MoneyField("Monto en Bs", amount) { amount = it }
             Text(
-                "La conversión usa la tasa BCV del mes o del día elegido",
-                style = BudgetTypography.bodyMedium,
+                "Tasa BCV automática",
+                style = BudgetTypography.bodySmall,
                 color = BudgetTheme.colors.onSurfaceVariant
             )
-            Text("Fecha de creación: ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))}")
-            OutlinedTextField(
-                value = timestampText,
-                onValueChange = { timestampText = it },
-                label = { Text("Fecha y hora (yyyy-MM-dd HH:mm)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(onClick = { showDatePicker = true }) { Text("Elegir fecha") }
-            Button(onClick = { val now = System.currentTimeMillis(); timestamp = now; timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(now)) }) { Text("Usar fecha actual") }
-            if (invalid) Text("Completa la descripción, usa valores válidos y una fecha que no esté en el futuro.", color = BudgetTheme.colors.error)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(timestamp)),
+                    style = BudgetTypography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { showDatePicker = true }) { Text("Elegir") }
+                TextButton(onClick = { 
+                    val now = System.currentTimeMillis()
+                    timestamp = now
+                    timestampText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(now))
+                }) { Text("Hoy") }
+            }
+            if (invalid) Text("Completa la descripción y usa valores válidos.", color = BudgetTheme.colors.error)
         }
     }, confirmButton = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {

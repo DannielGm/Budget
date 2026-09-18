@@ -11,8 +11,8 @@ android {
         applicationId = "com.personal.presupuesto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.4.3.0"
+        versionCode = 9
+        versionName = "0.4.3.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -35,6 +35,7 @@ dependencies {
     implementation("com.composables:composeunstyled-theming:2.9.2")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material:material-icons-core:1.7.8")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("androidx.room:room-ktx:2.7.2")

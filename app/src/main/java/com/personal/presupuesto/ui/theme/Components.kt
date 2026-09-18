@@ -346,7 +346,7 @@ fun BudgetDialog(
                             Box(
                                 Modifier
                                     .weight(1f, fill = false)
-                                    .heightIn(max = 420.dp)
+                                    .heightIn(max = 540.dp)
                                     .verticalScroll(rememberScrollState())
                             ) { text() }
                         }

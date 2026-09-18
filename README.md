@@ -124,6 +124,15 @@ Room stores each month in the app's private database. This is persistence, not e
 - App version: `0.4.3.0` (`versionCode=8`). Database moved to schema v4 (non-destructive migration).
 - All 24 unit tests pass, covering carry-forward rules, rate fallbacks, and multi-month consistency.
 
+### Phase 4.3.1 — UI Polish and Bug Fixes
+- Added a distinctive `brandHeadline` font (ExtraBold Serif) for the month title in the TopAppBar.
+- Updated the header to display the specific day when a filter is active (e.g., "17 - Septiembre").
+- Cleaned up the balance card to show only the numeric rate and its unit ("Bs/USD").
+- Replaced theme icons with standard Sun (`WbSunny`) and Moon (`NightsStay`) symbols.
+- Compacted the Expense Editor dialog: combined date actions into a single row and tightened spacing to fit more content.
+- Enabled interactive graph tapping: touching the graph now triggers the calendar picker for day filtering.
+- App version: `0.4.3.1` (`versionCode=9`).
+
 ## Planned Phase 4 — Multi-month budget model
 
 ### Phase 4.4 — Validation and regression checks
@@ -173,6 +182,8 @@ Calendar smoke-check checklist:
 The recorded emulator checks are smoke checks, not a committed automated Compose UI test suite. Broader accessibility, screen-size, and lifecycle coverage remains pending. Remaining style migration includes fields, cards, other dialogs, and the expense date picker; carry-forward business rules remain Phase 4.3 work.
 
 ## Verification status
+
+Phase 4.3.1 (`versionName=0.4.3.1`, `versionCode=9`) verified on emulator: confirmed distinctive header font, "Day - Month" title format, clean exchange rate display, and intuitive Sun/Moon theme icons. Verified the compacted expense dialog fits without immediate scrolling.
 
 Phase 4.3 (`versionName=0.4.3.0`, `versionCode=8`) passed `:app:testDebugUnitTest :app:assembleDebug` on 2026-09-17 with 24 tests, zero failures or errors. Verified carry-forward of Bs 800 balance and traceble debt from January to February in unit tests. On the emulator, confirmed the "Tasa BCV" badge updates, the theme toggle works, and the graph grid renders correctly. Used "Llenar datos de prueba" to verify multi-day tracking stability.
 

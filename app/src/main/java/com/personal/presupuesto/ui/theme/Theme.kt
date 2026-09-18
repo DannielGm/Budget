@@ -13,6 +13,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.text.font.FontFamily
 
 // App-owned design tokens. No Material theme: components read these directly.
 data class BudgetColors(
@@ -40,8 +41,9 @@ val LocalBudgetTextStyle = staticCompositionLocalOf { BudgetTypography.bodyLarge
 val LocalBudgetContentColor = staticCompositionLocalOf { Color.Unspecified }
 
 object BudgetTypography {
-    val headlineLarge = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Normal)
-    val headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Normal)
+    val brandHeadline = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp, fontFamily = FontFamily.Serif)
+    val headlineLarge = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold)
+    val headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold)
     val titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Normal)
     val titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium)
     val bodyLarge = TextStyle(fontSize = 16.sp)
